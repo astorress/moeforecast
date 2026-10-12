@@ -62,5 +62,5 @@ def test_decomposition_has_one_labeled_panel_per_component(demand):
         "Seasonal - 168 steps",
         "Residual",
     ]
-    assert all(ax.lines and ax.xaxis.get_shared_x_axes().joined(ax, fig.axes[0]) for ax in fig.axes)
+    assert all(ax.lines and ax.get_shared_x_axes().joined(ax, fig.axes[0]) for ax in fig.axes)
     assert all(not ax.spines["top"].get_visible() for ax in fig.axes)
