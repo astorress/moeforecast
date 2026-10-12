@@ -28,6 +28,7 @@ from moeforecast.metrics import mape
 from moeforecast.model_selection import temporal_train_test_split
 from moeforecast.persistence import load, save
 from moeforecast.pipeline import MoEForecaster
+from moeforecast.tuning import default_search_spaces
 
 __version__ = "0.1.0.dev0"
 
@@ -45,6 +46,7 @@ __all__ = [
     "compare_classifiers",
     "default_classifiers",
     "default_candidates",
+    "default_search_spaces",
     "feature_relevance",
     "fill_gaps",
     "load",

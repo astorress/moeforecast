@@ -28,7 +28,7 @@ def fitted(demand):
 
 
 def test_experts_are_routed_not_averaged(fitted, demand):
-    """Bug fixed: expert ids built in two formats made every prediction a plain average."""
+    """Each hour is routed to its experts instead of averaging all of them."""
     model, train, test = fitted
     _, meta = model.predict_with_metadata(demand)
     meta = meta.loc[test.index]
@@ -95,3 +95,24 @@ def test_forecast_and_persistence(fitted, demand, tmp_path):
     path = save(model, tmp_path / "model.joblib")
     again = load(path)
     assert np.allclose(again.predict(demand).dropna(), model.predict(demand).dropna())
+
+
+def test_gating_hpo_uses_later_validation_and_returns_ranked_scores(fitted, tmp_path):
+    model, _, validation = fitted
+    scores = model.tune_gating(
+        validation,
+        search="grid",
+        thresholds=(0.5, 0.8),
+        min_weights=(0.0, 0.1),
+    )
+    assert len(scores) == 12
+    assert scores.iloc[0]["mae_validation"] <= scores.iloc[-1]["mae_validation"]
+    assert model.gating_.threshold == scores.iloc[0]["threshold"]
+
+
+def test_fitted_model_diagram_can_be_saved(fitted, tmp_path):
+    model, _, _ = fitted
+    destination = tmp_path / "moe-architecture.png"
+    fig = model.plot_model(destination)
+    assert destination.is_file() and destination.stat().st_size > 0
+    assert fig._suptitle.get_text() == "Fitted Mixture-of-Experts Architecture"

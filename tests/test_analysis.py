@@ -50,3 +50,13 @@ def test_acf_pacf_plot_is_limited_to_30_lags_by_default(demand):
     assert all(ax.get_xlim()[1] == 30 for ax in axes)
     assert all(not ax.spines["top"].get_visible() for ax in axes)
     assert all(ax.title.get_fontfamily() == ["serif"] for ax in axes)
+
+
+def test_decomposition_has_one_labeled_panel_per_component(demand):
+    analyzer = SeriesAnalyzer().fit(demand)
+    fig = analyzer.plot_decomposition(periods=[24, 168])
+    assert [ax.get_title() for ax in fig.axes] == [
+        "Observed", "Trend", "Seasonal - 24 steps", "Seasonal - 168 steps", "Residual"
+    ]
+    assert all(ax.lines and ax.xaxis.get_shared_x_axes().joined(ax, fig.axes[0]) for ax in fig.axes)
+    assert all(not ax.spines["top"].get_visible() for ax in fig.axes)

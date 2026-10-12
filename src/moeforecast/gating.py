@@ -27,9 +27,14 @@ class GatingResult:
 
 
 def joint_probabilities(
-    probas: Sequence[np.ndarray], classes: Sequence[np.ndarray], expert_keys: Sequence[ExpertKey]
+    probas: Sequence[np.ndarray],
+    classes: Sequence[np.ndarray],
+    expert_keys: Sequence[ExpertKey],
+    temperature: float = 1.0,
 ) -> np.ndarray:
     """(n, E) product of per-dimension probabilities, re-normalized over the experts."""
+    if temperature <= 0:
+        raise ValueError("temperature must be greater than zero.")
     n = probas[0].shape[0]
     joint = np.ones((n, len(expert_keys)))
     for d, (proba, cls) in enumerate(zip(probas, classes, strict=True)):
@@ -39,7 +44,10 @@ def joint_probabilities(
             joint[:, e] *= proba[:, j] if j is not None else 0.0
     total = joint.sum(axis=1, keepdims=True)
     uniform = np.full_like(joint, 1.0 / len(expert_keys))
-    return np.where(total > 0, joint / np.where(total > 0, total, 1), uniform)
+    normalized = np.where(total > 0, joint / np.where(total > 0, total, 1), uniform)
+    calibrated = np.power(normalized, 1.0 / temperature)
+    calibrated_total = calibrated.sum(axis=1, keepdims=True)
+    return calibrated / np.where(calibrated_total > 0, calibrated_total, 1)
 
 
 def _confidence(probas: Sequence[np.ndarray]) -> np.ndarray:
@@ -78,13 +86,17 @@ class SoftGating(BaseEstimator):
     min_weight : float
         Experts whose (re-normalized) joint probability is below this value are
         dropped and the remaining weights re-normalized.
+    temperature : float
+        Positive calibration temperature. Values below 1 sharpen probabilities;
+        values above 1 make the soft weights more uniform.
     """
 
-    def __init__(self, min_weight: float = 0.05):
+    def __init__(self, min_weight: float = 0.05, temperature: float = 1.0):
         self.min_weight = min_weight
+        self.temperature = temperature
 
     def route(self, probas, classes, expert_keys) -> GatingResult:
-        joint = joint_probabilities(probas, classes, expert_keys)
+        joint = joint_probabilities(probas, classes, expert_keys, self.temperature)
         weights = _soft(joint, self.min_weight)
         return GatingResult(weights, np.full(len(joint), "soft"), _confidence(probas))
 
@@ -102,14 +114,17 @@ class AdaptiveGating(BaseEstimator):
         Confidence at or above which hard gating is used.
     min_weight : float
         Passed to the soft rule.
+    temperature : float
+        Positive calibration temperature applied to joint expert probabilities.
     """
 
-    def __init__(self, threshold: float = 0.75, min_weight: float = 0.05):
+    def __init__(self, threshold: float = 0.75, min_weight: float = 0.05, temperature: float = 1.0):
         self.threshold = threshold
         self.min_weight = min_weight
+        self.temperature = temperature
 
     def route(self, probas, classes, expert_keys) -> GatingResult:
-        joint = joint_probabilities(probas, classes, expert_keys)
+        joint = joint_probabilities(probas, classes, expert_keys, self.temperature)
         confidence = _confidence(probas)
         is_hard = confidence >= self.threshold
         weights = np.where(is_hard[:, None], _hard(joint), _soft(joint, self.min_weight))

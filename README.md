@@ -96,13 +96,40 @@ compare_classifiers(X, days.labels_for(train.index))
 model = MoEForecaster(
     features=features,
     clusterers=[days, weeks],
-    selector=ExpertSelector(metric="mae"),
+    selector=ExpertSelector(metric="mae", search="random", n_iter=20),
     gating=AdaptiveGating(threshold=0.75),
 ).fit(train)
 
 model.selector_.results_  # every candidate's CV score per expert
+report = model.inspect()
+report["expert_hyperparameter_searches"]  # every tried parameter set and its CV score
 pred, meta = model.predict_with_metadata(y)
 meta["mode"].value_counts()  # hard vs. soft gating decisions
+
+# Tune experts and classifiers by forward-chaining CV ("grid" is also supported).
+# Override any named default with your own sklearn parameter distributions.
+selector = ExpertSelector(
+    search="random",
+    n_iter=30,
+    search_spaces={"random_forest": {
+        "n_estimators": [100, 250, 500],
+        "max_depth": [None, 8, 16],
+        "min_samples_leaf": [1, 3, 5],
+    }},
+)
+model = MoEForecaster(
+    features=features,
+    clusterers=[days, weeks],
+    selector=selector,
+    classifier_search="grid",
+).fit(train)
+
+# Optimize gating on data not used by fit; review scores before using the setting.
+gating_scores = model.tune_gating(validation, search="grid", metric="mae")
+gating_scores.head()
+
+# Export an image of the actual fitted architecture.
+model.plot_model("outputs/moe-architecture.png")
 ```
 
 ## Inspect every fitted component
@@ -146,6 +173,19 @@ synthetic-data walkthrough of the public modeling API, including diagnostics,
 regime classifiers, all gating strategies, model inspection, forecasting and
 persistence.
 
+HPO uses forward-chaining folds. ``ExpertSelector(search="grid"|"random")``
+searches each candidate's parameter space independently inside each regime,
+then compares the tuned candidates and keeps the best estimator for that expert.
+Defaults are available for built-in model names through
+``default_search_spaces()``; pass ``search_spaces`` to replace or extend them.
+``MoEForecaster(classifier_search=...)`` tunes its regime classifiers.
+``tune_gating`` requires a later validation series that was not used for fitting;
+it searches adaptive-gating confidence thresholds, minimum expert weights and
+probability temperature. All fitted HPO objects and per-setting scores remain
+inspectable through ``inspect()`` and the component attributes.
+``plot_model(path)`` saves a diagram showing the fitted clusters, classifiers,
+experts and gating component.
+
 ## Design
 
 These principles prevent the errors that are easy to make when a Mixture of Experts is built by hand:
@@ -167,8 +207,6 @@ one-time Trusted Publisher setup.
 ## Roadmap
 
 - Deep-learning experts (LSTM/GRU) as an optional extra (`moeforecast[dl]`).
-- Hyperparameter optimization of the experts (`HalvingRandomSearchCV`).
-- Tuning of the gating parameters on a validation period.
 - DTW and k-Shape clustering (optional `tslearn` extra).
 - HTML report of the analysis and the fitted model.
 

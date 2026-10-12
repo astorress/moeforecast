@@ -21,6 +21,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVR
 
 from moeforecast.metrics import mae, mape, rmse
+from moeforecast.tuning import default_search_spaces, search_estimator
 
 ExpertKey = tuple[int, ...]
 """Identifier of an expert: one cluster label per regime dimension, e.g. (0, 1)."""
@@ -98,6 +99,10 @@ class ExpertSelector(BaseEstimator):
         complexity: Sequence[tuple[int, Sequence[str] | None]] = DEFAULT_COMPLEXITY,
         min_samples: int = 50,
         candidate_mode: str = "replace",
+        search: str | None = None,
+        search_spaces: Mapping[str, Mapping[str, object]] | None = None,
+        n_iter: int = 20,
+        random_state: int = 0,
     ):
         self.candidates = candidates
         self.metric = metric
@@ -105,6 +110,10 @@ class ExpertSelector(BaseEstimator):
         self.complexity = complexity
         self.min_samples = min_samples
         self.candidate_mode = candidate_mode
+        self.search = search
+        self.search_spaces = search_spaces
+        self.n_iter = n_iter
+        self.random_state = random_state
 
     def allowed_candidates(self, n: int, names: Sequence[str]) -> list[str]:
         allowed = None
@@ -125,6 +134,8 @@ class ExpertSelector(BaseEstimator):
             raise ValueError(f"metric must be one of {sorted(_METRICS)}")
         if self.candidate_mode not in {"replace", "extend"}:
             raise ValueError("candidate_mode must be 'replace' or 'extend'.")
+        if self.search not in {None, "grid", "random"}:
+            raise ValueError("search must be None, 'grid', or 'random'.")
         if self.candidates is None:
             candidates = default_candidates()
         elif self.candidate_mode == "extend":
@@ -134,10 +145,12 @@ class ExpertSelector(BaseEstimator):
         if not candidates:
             raise ValueError("At least one expert candidate is required.")
         self.candidate_estimators_ = {name: clone(model) for name, model in candidates.items()}
+        spaces = default_search_spaces()
+        spaces.update(self.search_spaces or {})
         score_fn = _METRICS[self.metric]
         valid = keys.notna().to_numpy() & y.notna().to_numpy() & X.notna().all(axis=1).to_numpy()
 
-        rows, self.experts_, self.selected_ = [], {}, {}
+        rows, self.experts_, self.selected_, self.search_results_ = [], {}, {}, {}
         for key in sorted(set(keys[valid])):
             mask = valid & np.fromiter((k == key for k in keys), dtype=bool, count=len(keys))
             n = int(mask.sum())
@@ -158,12 +171,49 @@ class ExpertSelector(BaseEstimator):
             names = self.allowed_candidates(n, list(candidates))
             cv = TimeSeriesSplit(n_splits=self.n_splits)
             scores = {}
+            best_estimators = {}
+            best_params = {}
+            self.search_results_[key] = {}
             for name in names:
-                fold_scores = []
-                for train_idx, test_idx in cv.split(Xk):
-                    model = clone(candidates[name]).fit(Xk.iloc[train_idx], yk.iloc[train_idx])
-                    fold_scores.append(score_fn(yk.iloc[test_idx], model.predict(Xk.iloc[test_idx])))
-                scores[name] = (float(np.mean(fold_scores)), float(np.std(fold_scores)))
+                if self.search is not None and name not in spaces and name != "linear":
+                    raise ValueError(
+                        f"No default HPO space for expert candidate '{name}'. "
+                        "Add its parameters to search_spaces or disable search."
+                    )
+                if self.search is not None and name in spaces:
+                    scorer = {
+                        "mae": "neg_mean_absolute_error",
+                        "rmse": "neg_root_mean_squared_error",
+                        "mape": "neg_mean_absolute_percentage_error",
+                    }[self.metric]
+                    search = search_estimator(
+                        clone(candidates[name]), spaces[name], Xk, yk, strategy=self.search,
+                        n_splits=self.n_splits, n_iter=self.n_iter, scoring=scorer,
+                        random_state=self.random_state,
+                    )
+                    fold_scores = -search.cv_results_["mean_test_score"]
+                    best_index = int(np.argmin(fold_scores))
+                    self.search_results_[key][name] = pd.DataFrame(
+                        {
+                            "params": search.cv_results_["params"],
+                            f"{self.metric}_mean": fold_scores,
+                            f"{self.metric}_std": search.cv_results_["std_test_score"],
+                        }
+                    ).sort_values(f"{self.metric}_mean", ignore_index=True)
+                    scores[name] = (
+                        float(fold_scores[best_index]),
+                        float(search.cv_results_["std_test_score"][best_index]),
+                    )
+                    best_estimators[name] = search.best_estimator_
+                    best_params[name] = search.best_params_
+                else:
+                    fold_scores = []
+                    for train_idx, test_idx in cv.split(Xk):
+                        model = clone(candidates[name]).fit(Xk.iloc[train_idx], yk.iloc[train_idx])
+                        fold_scores.append(score_fn(yk.iloc[test_idx], model.predict(Xk.iloc[test_idx])))
+                    scores[name] = (float(np.mean(fold_scores)), float(np.std(fold_scores)))
+                    best_estimators[name] = clone(candidates[name]).fit(Xk, yk)
+                    best_params[name] = {}
             best = min(scores, key=lambda name: scores[name][0])  # ties: first in candidate order
             for name, (mean, std) in scores.items():
                 rows.append(
@@ -174,11 +224,12 @@ class ExpertSelector(BaseEstimator):
                         "score_mean": mean,
                         "score_std": std,
                         "selected": name == best,
+                        "best_params": best_params[name],
                         "note": "",
                     }
                 )
             self.selected_[key] = best
-            self.experts_[key] = clone(candidates[best]).fit(Xk, yk)
+            self.experts_[key] = clone(best_estimators[best]).fit(Xk, yk)
 
         if not self.experts_:
             raise ValueError("No regime has enough samples to train an expert.")

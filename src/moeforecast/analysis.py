@@ -168,35 +168,53 @@ class SeriesAnalyzer:
         return axes
 
     def plot_decomposition(self, periods: Sequence[int] | None = None):
-        """MSTL decomposition with the given (or suggested) seasonal periods."""
+        """Plot an MSTL decomposition as aligned, clearly labelled components.
+
+        A separate panel is drawn for each seasonal period. The plot is built
+        explicitly rather than using ``MSTL.plot()`` so component labels and
+        colors do not depend on statsmodels' internal axes ordering.
+        """
+        import matplotlib.dates as mdates
+        import matplotlib.pyplot as plt
         from statsmodels.tsa.seasonal import MSTL
 
-        periods = list(periods or self.suggested_periods_[:2])
+        periods = list(self.suggested_periods_[:2] if periods is None else periods)
         y = self.y_.interpolate(limit_area="inside").dropna()
         if not periods:
             raise ValueError("At least one seasonal period is required for decomposition.")
-        fig = MSTL(y, periods=periods).fit().plot()
-        axes = np.atleast_1d(fig.axes)
-        labels = ["Observed", "Trend", *[f"Seasonal ({period})" for period in periods], "Residual"]
-        line_colors = ["#4682b4", "#ff8c00", "#2e8b57", "#2e8b57", "#cd5c5c"]
-        for index, ax in enumerate(axes):
-            ax.set_title(labels[index] if index < len(labels) else "Component", loc="left", fontsize=9)
-            ax.set_ylabel("")
-            for line in ax.lines:
-                line.set_color(line_colors[min(index, len(line_colors) - 1)])
-                line.set_linewidth(0.8)
-            style_axis(ax, grid_axis="y")
-            if index < len(axes) - 1:
-                ax.tick_params(axis="x", labelbottom=False)
-        axes[-1].set_xlabel("Date")
-        fig.suptitle(
-            f"{y.name or 'Series'} | MSTL decomposition",
-            x=0.01,
-            ha="left",
-            fontweight="bold",
-            fontfamily="serif",
+        if any(not isinstance(period, (int, np.integer)) or period < 2 for period in periods):
+            raise ValueError("Seasonal periods must be integers greater than or equal to 2.")
+        if len(set(periods)) != len(periods):
+            raise ValueError("Seasonal periods must be unique.")
+        if len(y) < 2 * max(periods):
+            raise ValueError("MSTL needs at least two complete cycles of the largest seasonal period.")
+
+        result = MSTL(y, periods=periods).fit()
+        components = [("Observed", y, "#315b7d"), ("Trend", result.trend, "#d17a22")]
+        seasonal = result.seasonal
+        if isinstance(seasonal, pd.Series):
+            seasonal = seasonal.to_frame(name=str(periods[0]))
+        for index, period in enumerate(periods):
+            column = seasonal.columns[index]
+            components.append(
+                (f"Seasonal - {period} steps", seasonal[column], PALETTE[index % len(PALETTE)])
+            )
+        components.append(("Residual", result.resid, "#a34d4d"))
+
+        fig, axes = plt.subplots(
+            len(components), 1, figsize=(13, 2.35 * len(components)), sharex=True, layout="constrained"
         )
-        fig.subplots_adjust(left=0.08, right=0.99, top=0.93, bottom=0.08, hspace=0.3)
+        axes = np.atleast_1d(axes)
+        for ax, (label, values, color) in zip(axes, components, strict=True):
+            ax.plot(values.index, values.to_numpy(), color=color, linewidth=1.15)
+            ax.set_title(label, loc="left", fontsize=10, fontweight="bold", pad=5)
+            ax.set_ylabel(str(y.name or "Value") if label == "Observed" else "")
+            style_axis(ax, grid_axis="y")
+        locator = mdates.AutoDateLocator(minticks=4, maxticks=9)
+        axes[-1].xaxis.set_major_locator(locator)
+        axes[-1].xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
+        axes[-1].set_xlabel("Date")
+        fig.suptitle(f"{y.name or 'Series'} - MSTL decomposition", x=0.01, ha="left", fontweight="bold")
         return fig
 
 
