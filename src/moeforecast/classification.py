@@ -48,8 +48,11 @@ class RegimeClassifier(ClassifierMixin, BaseEstimator):
             raise TypeError("The regime classifier must implement predict_proba.")
         self.features_ = list(self.features) if self.features is not None else list(X.columns)
         mask = y.notna().to_numpy() & X[self.features_].notna().all(axis=1).to_numpy()
-        self.estimator_ = clone(base).fit(X.loc[mask, self.features_], y[mask].astype(int))
+        y_fit = y[mask].astype(int)
+        self.estimator_ = clone(base).fit(X.loc[mask, self.features_], y_fit)
         self.classes_ = np.asarray(self.estimator_.classes_)
+        self.n_samples_fit_ = int(mask.sum())
+        self.class_counts_ = y_fit.value_counts().sort_index().reindex(self.classes_, fill_value=0)
         return self
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:

@@ -117,7 +117,18 @@ class ProfileClusterer(BaseEstimator):
         self.profiles_ = profiles
         self.mean_profiles_ = profiles.groupby(self.labels_.to_numpy()).mean()
         self.classes_ = np.arange(best_k)
+        counts = self.labels_.value_counts().reindex(self.classes_, fill_value=0)
+        self.cluster_summary_ = pd.DataFrame(
+            {
+                "n_profiles": counts,
+                "mean_level": self.mean_profiles_.mean(axis=1).reindex(self.classes_),
+            }
+        ).rename_axis("cluster")
         return self
+
+    def summary(self) -> pd.DataFrame:
+        """Return profile counts and mean raw value for each fitted cluster."""
+        return self.cluster_summary_.copy()
 
     # --------------------------------------------------------------- utilities
     def profile_matrix(self, y: pd.Series) -> pd.DataFrame:

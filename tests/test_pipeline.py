@@ -51,6 +51,38 @@ def test_training_does_not_see_test_period(fitted):
         assert clusterer.labels_.index.to_timestamp().max() < test.index[0]
 
 
+def test_inspect_exposes_fitted_models_and_diagnostics(fitted):
+    model, _, _ = fitted
+    report = model.inspect()
+
+    assert report["features"] == model.features_.feature_names_out_
+    assert report["regime_labels"].equals(model.regime_labels_)
+    assert set(report["clusters"]) == set(model.dimensions_)
+    for clusterer in model.clusterers_:
+        cluster = report["clusters"][clusterer.name_]
+        assert cluster["estimator"] is clusterer.kmeans_
+        assert cluster["assignments"].equals(clusterer.labels_)
+        assert cluster["summary"].equals(clusterer.summary())
+
+    for dimension, classifier in zip(model.dimensions_, model.classifiers_, strict=True):
+        details = report["classifiers"][dimension]
+        assert details["estimator"] is classifier.estimator_
+        assert details["class_counts"].sum() == details["n_samples_fit"]
+
+    assert report["expert_selection"]["expert_name"].notna().all()
+    assert set(report["experts"]) == set(model.expert_names_)
+    assert all(
+        report["experts"][name] is model.experts_[key]
+        for name, key in zip(model.expert_names_, model.expert_keys_, strict=True)
+    )
+    assert set(report["candidate_experts"]) == set(model.selector_.candidate_estimators_)
+
+
+def test_inspect_requires_fitted_model():
+    with pytest.raises(RuntimeError, match="must be fitted"):
+        MoEForecaster().inspect()
+
+
 def test_forecast_and_persistence(fitted, demand, tmp_path):
     model, train, test = fitted
     fc = model.forecast(train, steps=48)

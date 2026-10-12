@@ -14,6 +14,8 @@ def test_labels_are_ordered_by_level(demand):
     pc = ProfileClusterer("D", n_clusters=3).fit(demand)
     means = pc.mean_profiles_.mean(axis=1).to_numpy()
     assert (means[:-1] < means[1:]).all()
+    assert pc.summary()["n_profiles"].sum() == len(pc.profiles_)
+    assert pc.summary()["mean_level"].is_monotonic_increasing
 
 
 def test_k_selection_and_weekly_profiles(demand):

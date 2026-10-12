@@ -103,6 +103,77 @@ class MoEForecaster(BaseEstimator):
         self.freq_ = y.index.freqstr
         return self
 
+    def inspect(self) -> dict[str, object]:
+        """Expose fitted estimators and diagnostics for every MoE component.
+
+        The returned scikit-learn estimators are the actual fitted objects, not
+        summaries or copies. Diagnostic DataFrames and label Series are copied
+        so editing a report does not mutate the forecaster.
+
+        Returns
+        -------
+        dict
+            Configuration, features, regime labels, cluster results, fitted
+            classifiers, expert-selection scores, fitted experts, and gating.
+            Cluster entries include the estimator, candidate-k scores,
+            assignments, raw profiles, raw mean profiles, and cluster summary.
+        """
+        if not hasattr(self, "selector_"):
+            raise RuntimeError("MoEForecaster must be fitted before it can be inspected.")
+
+        clusters = {}
+        for clusterer in self.clusterers_:
+            clusters[clusterer.name_] = {
+                "estimator": clusterer.kmeans_,
+                "clusterer": clusterer,
+                "scores": clusterer.scores_.copy(),
+                "assignments": clusterer.labels_.copy(),
+                "profiles": clusterer.profiles_.copy(),
+                "mean_profiles": clusterer.mean_profiles_.copy(),
+                "summary": clusterer.summary(),
+            }
+
+        classifiers = {}
+        for dimension, classifier in zip(self.dimensions_, self.classifiers_, strict=True):
+            classifiers[dimension] = {
+                "wrapper": classifier,
+                "estimator": classifier.estimator_,
+                "features": classifier.features_.copy(),
+                "classes": classifier.classes_.copy(),
+                "class_counts": classifier.class_counts_.copy(),
+                "n_samples_fit": classifier.n_samples_fit_,
+            }
+
+        expert_names = dict(zip(self.expert_keys_, self.expert_names_, strict=True))
+        expert_selection = self.selector_.results_.copy()
+        expert_selection.insert(
+            1,
+            "expert_name",
+            expert_selection["expert"].map(expert_names).fillna("not trained"),
+        )
+
+        return {
+            "configuration": {
+                "frequency": self.freq_,
+                "features": self.features_,
+                "clusterers": self.clusterers_,
+                "classifier": self.classifier,
+                "classifier_features": self.classifier_features,
+                "selector": self.selector_,
+                "gating": self.gating_,
+            },
+            "features": self.features_.feature_names_out_.copy(),
+            "regime_labels": self.regime_labels_.copy(),
+            "clusters": clusters,
+            "classifiers": classifiers,
+            "expert_selection": expert_selection,
+            "candidate_experts": self.selector_.candidate_estimators_.copy(),
+            "experts": {
+                expert_names[key]: estimator for key, estimator in self.experts_.items()
+            },
+            "gating": self.gating_,
+        }
+
     # --------------------------------------------------------------- prediction
     def predict(self, y: pd.Series) -> pd.Series:
         """

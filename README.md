@@ -103,7 +103,46 @@ pred, meta = model.predict_with_metadata(y)
 meta["mode"].value_counts()  # hard vs. soft gating decisions
 ```
 
-The [quickstart notebook](examples/quickstart.ipynb) walks through this on synthetic data.
+## Inspect every fitted component
+
+The fitted estimators are not hidden behind the forecaster. `inspect()` returns
+the actual scikit-learn objects together with copied diagnostic tables:
+
+```python
+report = model.inspect()
+
+# Cluster assignments, candidate-k scores, source profiles and cluster means
+report["clusters"]["day"]["summary"]
+report["clusters"]["day"]["scores"]
+report["clusters"]["day"]["assignments"]
+report["clusters"]["day"]["mean_profiles"]
+
+# Fitted classifier and its input features / class counts
+classifier = report["classifiers"]["day"]
+print(classifier["estimator"])
+classifier["features"], classifier["class_counts"]
+
+# Every candidate's time-series CV results and each final fitted expert
+report["expert_selection"]
+for expert_name, estimator in report["experts"].items():
+    print(expert_name, estimator)
+
+# Candidate model templates, fitted feature builder, and gating estimator
+report["candidate_experts"]
+report["configuration"]["features"].get_params()
+report["gating"].get_params()
+```
+
+`inspect()` also exposes the full `ProfileClusterer` objects and fitted k-means
+estimators. `RegimeClassifier.estimator_`, `ExpertSelector.experts_`,
+`ExpertSelector.candidate_estimators_`, `ProfileClusterer.labels_`,
+`ProfileClusterer.scores_`, and `ProfileClusterer.mean_profiles_` remain
+available directly for users who prefer to inspect individual components.
+
+See the [quickstart notebook](examples/quickstart.ipynb) for a complete,
+synthetic-data walkthrough of the public modeling API, including diagnostics,
+regime classifiers, all gating strategies, model inspection, forecasting and
+persistence.
 
 ## Design
 

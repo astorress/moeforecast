@@ -3,6 +3,27 @@ import pandas as pd
 import pytest
 
 from moeforecast import fill_gaps, prepare_series
+from moeforecast.data import step_of
+
+
+@pytest.mark.parametrize(
+    ("freq", "duration"),
+    [("D", pd.Timedelta(days=1)), ("24h", pd.Timedelta(days=1)), ("h", pd.Timedelta(hours=1))],
+)
+def test_step_of_fixed_frequencies(freq, duration):
+    assert step_of(freq) == duration
+
+
+def test_prepare_daily_series_with_day_alias():
+    data = pd.Series(
+        np.arange(5.0),
+        index=pd.date_range("2024-01-01", periods=5, freq="D"),
+    )
+
+    result = prepare_series(data, freq="D")
+
+    assert result.index.freqstr == "D"
+    assert len(result) == 5
 
 
 def test_prepare_series_from_dataframe_reports_gaps():

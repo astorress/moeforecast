@@ -118,6 +118,7 @@ class ExpertSelector(BaseEstimator):
         if self.metric not in _METRICS:
             raise ValueError(f"metric must be one of {sorted(_METRICS)}")
         candidates = dict(self.candidates or default_candidates())
+        self.candidate_estimators_ = {name: clone(model) for name, model in candidates.items()}
         score_fn = _METRICS[self.metric]
         valid = keys.notna().to_numpy() & y.notna().to_numpy() & X.notna().all(axis=1).to_numpy()
 

@@ -32,8 +32,10 @@ def step_of(freq: str) -> pd.Timedelta:
     """Duration of one step of a fixed frequency such as 'h', '15min' or 'D'."""
     offset = to_offset(freq)
     try:
-        return pd.Timedelta(offset)
-    except ValueError as err:
+        # Convert through nanoseconds: pandas 3 no longer accepts a Day offset
+        # directly in Timedelta, although it is a fixed-duration frequency.
+        return pd.Timedelta(offset.nanos, unit="ns")
+    except (AttributeError, ValueError) as err:
         raise ValueError(
             f"Frequency '{freq}' has no fixed duration. moeforecast supports fixed "
             "frequencies such as 'min', 'h' or 'D'."
