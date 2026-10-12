@@ -9,7 +9,7 @@ description = "Mixture-of-Experts time series forecasting with regime clustering
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [{ name = "Sebastián Torres", email = "anderson.torress@udea.edu.co" }]
+authors = [{ name = "Sebastián Torres", email = "sebastiantorres8800@gmail.com" }]
 requires-python = ">=3.10"
 keywords = ["forecasting", "time series", "mixture of experts", "clustering", "load forecasting", "scikit-learn"]
 classifiers = [

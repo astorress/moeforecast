@@ -418,7 +418,7 @@ class MoEForecaster(BaseEstimator):
         for key, y_pos in zip(self.expert_keys_, positions(n_experts), strict=True):
             estimator = self.experts_[key]
             selected_row = self.selector_.results_.loc[
-                self.selector_.results_["expert"].map(lambda expert: expert == key)
+                self.selector_.results_["expert"].map(key.__eq__)
                 & self.selector_.results_["selected"]
             ].iloc[0]
             params = selected_row.get("best_params", {})
