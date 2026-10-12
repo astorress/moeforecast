@@ -53,6 +53,15 @@ def test_monthly_profiles_are_supported():
     assert clusterer.labels_.notna().all()
 
 
+def test_month_start_profiles_produce_timestamp_labels():
+    index = pd.date_range("2020-01-01", "2022-12-31", freq="D")
+    y = pd.Series(np.sin(np.arange(len(index)) * 2 * np.pi / 7), index=index)
+    clusterer = ProfileClusterer("MS", n_clusters=2).fit(y)
+    labels = clusterer.labels_for(index)
+    assert labels.notna().all()
+    assert len(labels) == len(index)
+
+
 def test_monthly_frequency_can_cluster_monthly_values():
     index = pd.date_range("2020-01-31", periods=48, freq="ME")
     y = pd.Series(np.linspace(1, 10, len(index)), index=index)

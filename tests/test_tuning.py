@@ -4,7 +4,7 @@ from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from moeforecast import ExpertSelector, RegimeClassifier, default_search_spaces
+from moeforecast import ExpertSelector, RegimeClassifier, compare_classifiers, default_search_spaces
 
 
 def test_default_search_spaces_cover_builtin_models():
@@ -47,3 +47,29 @@ def test_regime_classifier_can_random_search_parameters():
     assert classifier.search_.best_params_["logisticregression__C"] in {0.1, 1.0}
     assert classifier.search_.cv_results_["params"]
     assert classifier.predict_proba(X).shape == (len(X), 2)
+
+
+def test_classifier_hpo_skips_single_class_warmup_folds():
+    index = pd.date_range("2024-01-01", periods=60, freq="h")
+    X = pd.DataFrame({"x": np.sin(np.arange(60) / 5)}, index=index)
+    labels = pd.Series(np.r_[np.zeros(30, dtype=int), np.tile([0, 1], 15)], index=index)
+    estimator = make_pipeline(StandardScaler(), LogisticRegression(max_iter=500))
+
+    classifier = RegimeClassifier(
+        estimator=estimator,
+        search="grid",
+        search_space={"logisticregression__C": [0.1, 1.0]},
+        n_splits=3,
+    ).fit(X, labels)
+    assert len(classifier.search_.cv) == 1
+
+    results = compare_classifiers(
+        X,
+        labels,
+        candidates={"logistic": estimator},
+        n_splits=3,
+        search="grid",
+        search_spaces={"logistic": {"logisticregression__C": [0.1, 1.0]}},
+    )
+    assert results.loc[0, "n_folds"] == 1
+    assert len(results.loc[0, "best_params_by_fold"]) == 1

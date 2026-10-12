@@ -227,9 +227,9 @@ class ProfileClusterer(BaseEstimator):
         monthly_data = monthly_profile and str(y.index.freqstr).upper() in {"M", "ME", "MS"}
         profile_y = y if monthly_data else y.resample("D").mean() if monthly_profile else y
         step = pd.Timedelta(1, "ns") if monthly_data else step_of(y.index.freqstr)
-        periods = y.index.to_period("M" if monthly_profile else self.profile)
+        periods = y.index.to_period(self._period_frequency())
         if monthly_profile:
-            periods = profile_y.index.to_period("M")
+            periods = profile_y.index.to_period(self._period_frequency())
             grouped = pd.DataFrame(
                 {"period": periods, "value": profile_y.to_numpy()}, index=profile_y.index
             ).groupby("period")
@@ -263,8 +263,14 @@ class ProfileClusterer(BaseEstimator):
 
     def labels_for(self, index: pd.DatetimeIndex) -> pd.Series:
         """Cluster label of each timestamp; NaN for periods not seen in ``fit``."""
-        periods = index.to_period(self.profile)
+        periods = index.to_period(self._period_frequency())
         return pd.Series(self.labels_.reindex(periods).to_numpy(), index=index, name=self.name_)
+
+    def _period_frequency(self) -> str:
+        """Translate start-anchored month profiles to pandas' period alias."""
+        if str(self.profile).upper() in {"M", "ME", "MS"}:
+            return "M"
+        return self.profile
 
     def _normalize(self, X: np.ndarray) -> np.ndarray:
         if self.normalize == "zscore":

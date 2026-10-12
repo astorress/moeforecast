@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+import numpy as np
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import GridSearchCV, ParameterGrid, RandomizedSearchCV, TimeSeriesSplit
 
@@ -69,6 +70,7 @@ def search_estimator(
     n_iter: int,
     scoring: str,
     random_state: int = 0,
+    cv=None,
 ):
     """Fit a grid/random search using forward-chaining CV and return the search."""
     if strategy not in {"grid", "random"}:
@@ -77,7 +79,7 @@ def search_estimator(
         raise ValueError("A non-empty parameter space is required for HPO.")
     if n_splits < 2 or len(X) <= n_splits:
         raise ValueError("HPO requires at least n_splits + 1 samples.")
-    cv = TimeSeriesSplit(n_splits=n_splits)
+    cv = TimeSeriesSplit(n_splits=n_splits) if cv is None else cv
     common = dict(estimator=estimator, cv=cv, scoring=scoring, refit=True, n_jobs=-1, error_score="raise")
     if strategy == "grid":
         search = GridSearchCV(**common, param_grid=dict(param_space))
@@ -95,3 +97,25 @@ def search_estimator(
             random_state=random_state,
         )
     return search.fit(X, y)
+
+
+def classification_time_series_splits(y, n_splits: int, gap: int = 0) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Create forward-only folds whose training portion contains at least two classes.
+
+    Early folds can contain only one class when regime labels are rare or first
+    appear later in the series. Those warm-up folds cannot fit a classifier and
+    are excluded; chronological order is preserved for all remaining folds.
+    """
+    values = np.asarray(y)
+    splitter = TimeSeriesSplit(n_splits=n_splits, gap=gap)
+    folds = [
+        (train_idx, test_idx)
+        for train_idx, test_idx in splitter.split(values)
+        if np.unique(values[train_idx]).size >= 2
+    ]
+    if not folds:
+        raise ValueError(
+            "No forward-chaining fold has at least two classes in its training portion. "
+            "Use fewer splits, a longer training history, or revise the regime labels."
+        )
+    return folds

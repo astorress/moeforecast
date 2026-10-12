@@ -10,11 +10,11 @@ from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
-from sklearn.model_selection import TimeSeriesSplit, cross_validate
+from sklearn.model_selection import cross_validate
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from moeforecast.tuning import default_search_spaces, search_estimator
+from moeforecast.tuning import classification_time_series_splits, default_search_spaces, search_estimator
 
 
 def default_classifiers(
@@ -101,6 +101,7 @@ class RegimeClassifier(ClassifierMixin, BaseEstimator):
                 n_iter=self.n_iter,
                 scoring="f1_macro",
                 random_state=self.random_state,
+                cv=classification_time_series_splits(y_fit, self.n_splits),
             )
             self.estimator_ = self.search_.best_estimator_
         self.classes_ = np.asarray(self.estimator_.classes_)
@@ -152,11 +153,11 @@ def compare_classifiers(
     spaces = default_search_spaces()
     spaces.update(search_spaces or {})
     feature_sets = feature_sets or {"all": list(X.columns)}
-    cv = TimeSeriesSplit(n_splits=n_splits, gap=gap)
     rows = []
     for set_name, cols in feature_sets.items():
         mask = y.notna().to_numpy() & X[list(cols)].notna().all(axis=1).to_numpy()
         Xs, ys = X.loc[mask, list(cols)], y[mask].astype(int)
+        cv = classification_time_series_splits(ys, n_splits=n_splits, gap=gap)
         for clf_name, clf in candidates.items():
             params = []
             if search is not None:
@@ -167,10 +168,11 @@ def compare_classifiers(
                 if space is None:
                     raise ValueError(f"No search space configured for classifier '{clf_name}'.")
                 accuracy_scores, f1_scores = [], []
-                for fold, (train_idx, test_idx) in enumerate(cv.split(Xs, ys)):
+                for fold, (train_idx, test_idx) in enumerate(cv):
                     inner_splits = min(n_splits, len(train_idx) - 1)
                     if inner_splits < 2:
                         raise ValueError("Not enough training samples for nested classifier HPO.")
+                    inner_cv = classification_time_series_splits(ys.iloc[train_idx], n_splits=inner_splits)
                     optimized = search_estimator(
                         clone(clf),
                         space,
@@ -181,6 +183,7 @@ def compare_classifiers(
                         n_iter=n_iter,
                         scoring="f1_macro",
                         random_state=random_state + fold,
+                        cv=inner_cv,
                     )
                     prediction = optimized.best_estimator_.predict(Xs.iloc[test_idx])
                     accuracy_scores.append(accuracy_score(ys.iloc[test_idx], prediction))
@@ -197,6 +200,7 @@ def compare_classifiers(
                     "feature_set": set_name,
                     "classifier": clf_name,
                     "n_features": len(cols),
+                    "n_folds": len(cv),
                     "accuracy_mean": scores["test_accuracy"].mean(),
                     "accuracy_std": scores["test_accuracy"].std(),
                     "f1_macro_mean": scores["test_f1_macro"].mean(),
