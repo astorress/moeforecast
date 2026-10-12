@@ -305,9 +305,7 @@ class MoEForecaster(BaseEstimator):
         actual = validation.loc[valid]
         probas = [clf.predict_proba(Xv) for clf in self.classifiers_]
         classes = [clf.classes_ for clf in self.classifiers_]
-        expert_predictions = np.column_stack(
-            [self.experts_[key].predict(Xv) for key in self.expert_keys_]
-        )
+        expert_predictions = np.column_stack([self.experts_[key].predict(Xv) for key in self.expert_keys_])
         parameter_space = {
             "threshold": list(thresholds),
             "min_weight": list(min_weights),
@@ -352,8 +350,13 @@ class MoEForecaster(BaseEstimator):
 
         def box(x, y, width, height, title, detail, color):
             patch = FancyBboxPatch(
-                (x, y), width, height, boxstyle="round,pad=0.012,rounding_size=0.018",
-                linewidth=1.2, edgecolor=color, facecolor=color + "18",
+                (x, y),
+                width,
+                height,
+                boxstyle="round,pad=0.012,rounding_size=0.018",
+                linewidth=1.2,
+                edgecolor=color,
+                facecolor=color + "18",
             )
             ax.add_patch(patch)
             ax.text(x + width / 2, y + height * 0.62, title, ha="center", va="center", fontweight="bold")
@@ -361,11 +364,16 @@ class MoEForecaster(BaseEstimator):
             return (x, y, width, height)
 
         def connect(left, right):
-            ax.add_patch(FancyArrowPatch(
-                (left[0] + left[2], left[1] + left[3] / 2),
-                (right[0], right[1] + right[3] / 2),
-                arrowstyle="-|>", mutation_scale=11, linewidth=0.9, color="#778899",
-            ))
+            ax.add_patch(
+                FancyArrowPatch(
+                    (left[0] + left[2], left[1] + left[3] / 2),
+                    (right[0], right[1] + right[3] / 2),
+                    arrowstyle="-|>",
+                    mutation_scale=11,
+                    linewidth=0.9,
+                    color="#778899",
+                )
+            )
 
         left_x, mid_x, gate_x, right_x = 0.03, 0.29, 0.57, 0.79
         h = min(0.105, 0.72 / max(n_dimensions, n_experts))
@@ -423,9 +431,7 @@ class MoEForecaster(BaseEstimator):
             ].iloc[0]
             params = selected_row.get("best_params", {})
             detail = f"{type(estimator).__name__}\n{params or 'default parameters'}"
-            expert_boxes.append(
-                box(right_x, y_pos, 0.19, h, name_by_key[key], detail, "#9b5364")
-            )
+            expert_boxes.append(box(right_x, y_pos, 0.19, h, name_by_key[key], detail, "#9b5364"))
         for item in classifier_boxes:
             connect(feature, item)
             connect(cluster_box, item)

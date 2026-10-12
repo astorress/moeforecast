@@ -187,8 +187,14 @@ class ExpertSelector(BaseEstimator):
                         "mape": "neg_mean_absolute_percentage_error",
                     }[self.metric]
                     search = search_estimator(
-                        clone(candidates[name]), spaces[name], Xk, yk, strategy=self.search,
-                        n_splits=self.n_splits, n_iter=self.n_iter, scoring=scorer,
+                        clone(candidates[name]),
+                        spaces[name],
+                        Xk,
+                        yk,
+                        strategy=self.search,
+                        n_splits=self.n_splits,
+                        n_iter=self.n_iter,
+                        scoring=scorer,
                         random_state=self.random_state,
                     )
                     fold_scores = -search.cv_results_["mean_test_score"]

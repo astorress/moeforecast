@@ -92,9 +92,15 @@ class RegimeClassifier(ClassifierMixin, BaseEstimator):
                         f"No default search space for {type(base).__name__}; pass search_space explicitly."
                     ) from exc
             self.search_ = search_estimator(
-                clone(base), space, X_fit, y_fit, strategy=self.search,
-                n_splits=self.n_splits, n_iter=self.n_iter,
-                scoring="f1_macro", random_state=self.random_state,
+                clone(base),
+                space,
+                X_fit,
+                y_fit,
+                strategy=self.search,
+                n_splits=self.n_splits,
+                n_iter=self.n_iter,
+                scoring="f1_macro",
+                random_state=self.random_state,
             )
             self.estimator_ = self.search_.best_estimator_
         self.classes_ = np.asarray(self.estimator_.classes_)
@@ -166,8 +172,14 @@ def compare_classifiers(
                     if inner_splits < 2:
                         raise ValueError("Not enough training samples for nested classifier HPO.")
                     optimized = search_estimator(
-                        clone(clf), space, Xs.iloc[train_idx], ys.iloc[train_idx], strategy=search,
-                        n_splits=inner_splits, n_iter=n_iter, scoring="f1_macro",
+                        clone(clf),
+                        space,
+                        Xs.iloc[train_idx],
+                        ys.iloc[train_idx],
+                        strategy=search,
+                        n_splits=inner_splits,
+                        n_iter=n_iter,
+                        scoring="f1_macro",
                         random_state=random_state + fold,
                     )
                     prediction = optimized.best_estimator_.predict(Xs.iloc[test_idx])

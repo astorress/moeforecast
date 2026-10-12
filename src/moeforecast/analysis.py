@@ -196,9 +196,7 @@ class SeriesAnalyzer:
             seasonal = seasonal.to_frame(name=str(periods[0]))
         for index, period in enumerate(periods):
             column = seasonal.columns[index]
-            components.append(
-                (f"Seasonal - {period} steps", seasonal[column], PALETTE[index % len(PALETTE)])
-            )
+            components.append((f"Seasonal - {period} steps", seasonal[column], PALETTE[index % len(PALETTE)]))
         components.append(("Residual", result.resid, "#a34d4d"))
 
         fig, axes = plt.subplots(

@@ -111,11 +111,13 @@ meta["mode"].value_counts()  # hard vs. soft gating decisions
 selector = ExpertSelector(
     search="random",
     n_iter=30,
-    search_spaces={"random_forest": {
-        "n_estimators": [100, 250, 500],
-        "max_depth": [None, 8, 16],
-        "min_samples_leaf": [1, 3, 5],
-    }},
+    search_spaces={
+        "random_forest": {
+            "n_estimators": [100, 250, 500],
+            "max_depth": [None, 8, 16],
+            "min_samples_leaf": [1, 3, 5],
+        }
+    },
 )
 model = MoEForecaster(
     features=features,
