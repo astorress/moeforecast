@@ -438,16 +438,8 @@ class MoEForecaster(BaseEstimator):
             connect(item, gate)
         for item in expert_boxes:
             connect(gate, item)
-        ax.text(
-            0.5,
-            0.97,
-            "Fitted Mixture-of-Experts Architecture",
-            ha="center",
-            va="top",
-            fontsize=14,
-            fontweight="bold",
-        )
-        fig.tight_layout()
+        fig.suptitle("Fitted Mixture-of-Experts Architecture", fontsize=14, fontweight="bold")
+        fig.tight_layout(rect=(0, 0, 1, 0.96))
         if path is not None:
             fig.savefig(path, dpi=dpi, bbox_inches="tight", facecolor="white")
         return fig

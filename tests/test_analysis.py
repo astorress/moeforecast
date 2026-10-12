@@ -55,7 +55,7 @@ def test_acf_pacf_plot_is_limited_to_30_lags_by_default(demand):
 def test_decomposition_has_one_labeled_panel_per_component(demand):
     analyzer = SeriesAnalyzer().fit(demand)
     fig = analyzer.plot_decomposition(periods=[24, 168])
-    assert [ax.get_title() for ax in fig.axes] == [
+    assert [ax.get_title(loc="left") for ax in fig.axes] == [
         "Observed",
         "Trend",
         "Seasonal - 24 steps",
