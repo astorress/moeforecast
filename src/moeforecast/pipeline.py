@@ -168,9 +168,7 @@ class MoEForecaster(BaseEstimator):
             "classifiers": classifiers,
             "expert_selection": expert_selection,
             "candidate_experts": self.selector_.candidate_estimators_.copy(),
-            "experts": {
-                expert_names[key]: estimator for key, estimator in self.experts_.items()
-            },
+            "experts": {expert_names[key]: estimator for key, estimator in self.experts_.items()},
             "gating": self.gating_,
         }
 
