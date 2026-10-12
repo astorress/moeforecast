@@ -377,6 +377,7 @@ class MoEForecaster(BaseEstimator):
 
         left_x, mid_x, gate_x, right_x = 0.03, 0.29, 0.57, 0.79
         h = min(0.105, 0.72 / max(n_dimensions, n_experts))
+
         def positions(count):
             gap = (0.84 - count * h) / max(count - 1, 1)
             return [0.92 - h - i * (h + gap) for i in range(count)]
@@ -426,8 +427,7 @@ class MoEForecaster(BaseEstimator):
         for key, y_pos in zip(self.expert_keys_, positions(n_experts), strict=True):
             estimator = self.experts_[key]
             selected_row = self.selector_.results_.loc[
-                self.selector_.results_["expert"].map(key.__eq__)
-                & self.selector_.results_["selected"]
+                self.selector_.results_["expert"].map(key.__eq__) & self.selector_.results_["selected"]
             ].iloc[0]
             params = selected_row.get("best_params", {})
             detail = f"{type(estimator).__name__}\n{params or 'default parameters'}"
