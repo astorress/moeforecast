@@ -122,7 +122,13 @@ def prepare_series(
         deltas = y.index.to_series().diff().dropna()
         if deltas.empty:
             raise ValueError("Cannot infer the frequency of a single timestamp; pass `freq`.")
-        freq = to_offset(deltas.mode().iloc[0]).freqstr
+        # A calendar frequency (e.g. month starts) must not be mistaken for its most common
+        # spacing in hours: pd.infer_freq reports it, and step_of() below rejects it clearly.
+        try:
+            exact = pd.infer_freq(y.index) if len(y.index) >= 3 else None
+        except (TypeError, ValueError):
+            exact = None
+        freq = exact or to_offset(deltas.mode().iloc[0]).freqstr
     step_of(freq)  # validate
     y = y.asfreq(freq)
     y.name = target or y.name or "y"

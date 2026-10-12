@@ -335,111 +335,179 @@ class MoEForecaster(BaseEstimator):
         return self.gating_results_.copy()
 
     def plot_model(self, path=None, *, dpi: int = 180):
-        """Draw the fitted MoE architecture and optionally save it to ``path``."""
+        """Draw the fitted MoE architecture and optionally save it to ``path``.
+
+        Columns: input features and profile clusters, one regime classifier per
+        dimension, the gating rule, and one box per expert. Expert boxes show the
+        fitted model family (the final step of a pipeline) and its tuned
+        parameters, and are coloured by family so expert diversity is visible.
+        """
         import matplotlib.pyplot as plt
         from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 
+        from moeforecast._plotting import PALETTE
+
         if not hasattr(self, "selector_"):
             raise RuntimeError("MoEForecaster must be fitted before its diagram can be drawn.")
-        n_dimensions = len(self.dimensions_)
-        n_experts = len(self.expert_keys_)
-        fig, ax = plt.subplots(figsize=(13, max(5, 0.42 * max(n_dimensions, n_experts))))
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
+        n_dim, n_exp = len(self.dimensions_), len(self.expert_keys_)
+        # Coordinates are in inches. Expert boxes are as tall as their longest text.
+        tuned_lines = []
+        for key in self.expert_keys_:
+            row = self.selector_.results_.loc[
+                self.selector_.results_["expert"].map(key.__eq__) & self.selector_.results_["selected"]
+            ].iloc[0]
+            tuned = row.get("best_params", {})
+            tuned_lines.append(len(_wrap_params(tuned, 34)) if isinstance(tuned, dict) and tuned else 0)
+        exp_h = 0.85 + 0.2 * max(tuned_lines, default=0)
+        height = max(5.5, n_exp * (exp_h + 0.2) + 1.8, n_dim * 1.9 + 1.8)
+        width = 17.0
+        fig, ax = plt.subplots(figsize=(width, height))
+        ax.set_xlim(0, width)
+        ax.set_ylim(0, height)
         ax.axis("off")
 
-        def box(x, y, width, height, title, detail, color):
-            patch = FancyBboxPatch(
-                (x, y),
-                width,
-                height,
-                boxstyle="round,pad=0.012,rounding_size=0.018",
-                linewidth=1.2,
-                edgecolor=color,
-                facecolor=color + "18",
+        def box(x, y, w, h, title, lines, color, title_size=10.5):
+            ax.add_patch(
+                FancyBboxPatch(
+                    (x, y),
+                    w,
+                    h,
+                    boxstyle="round,pad=0.02,rounding_size=0.12",
+                    linewidth=1.3,
+                    edgecolor=color,
+                    facecolor=color + "22",
+                )
             )
-            ax.add_patch(patch)
-            ax.text(x + width / 2, y + height * 0.62, title, ha="center", va="center", fontweight="bold")
-            ax.text(x + width / 2, y + height * 0.28, detail, ha="center", va="center", fontsize=8, wrap=True)
-            return (x, y, width, height)
+            body = [str(line) for line in lines if line]
+            top = y + h - 0.2
+            ax.text(x + w / 2, top, title, ha="center", va="top", fontsize=title_size, fontweight="bold")
+            ax.text(
+                x + w / 2,
+                top - 0.3,
+                "\n".join(body),
+                ha="center",
+                va="top",
+                fontsize=8,
+                color="#2c3e50",
+                linespacing=1.35,
+            )
+            return (x, y, w, h)
 
-        def connect(left, right):
+        def connect(src, dst, color="#8895a3"):
             ax.add_patch(
                 FancyArrowPatch(
-                    (left[0] + left[2], left[1] + left[3] / 2),
-                    (right[0], right[1] + right[3] / 2),
+                    (src[0] + src[2], src[1] + src[3] / 2),
+                    (dst[0], dst[1] + dst[3] / 2),
                     arrowstyle="-|>",
-                    mutation_scale=11,
-                    linewidth=0.9,
-                    color="#778899",
+                    mutation_scale=10,
+                    linewidth=0.8,
+                    color=color,
+                    alpha=0.8,
+                    connectionstyle="arc3,rad=0.0",
                 )
             )
 
-        left_x, mid_x, gate_x, right_x = 0.03, 0.29, 0.57, 0.79
-        h = min(0.105, 0.72 / max(n_dimensions, n_experts))
+        def centers(count, box_h):
+            slot = (height - 1.8) / count
+            return [height - 1.0 - (i + 1) * slot + (slot - box_h) / 2 for i in range(count)]
 
-        def positions(count):
-            gap = (0.84 - count * h) / max(count - 1, 1)
-            return [0.92 - h - i * (h + gap) for i in range(count)]
+        def short(params, limit=34):
+            return "\n".join(_wrap_params(params, limit)) if params else "default parameters"
 
+        x_in, w_in = 0.3, 3.0
+        x_clf, w_clf = 4.3, 3.9
+        x_gate, w_gate = 9.3, 3.0
+        x_exp, w_exp = 13.4, 3.3
+
+        mid = height / 2 - 0.4
         feature = box(
-            left_x,
-            0.45,
-            0.19,
-            0.12,
+            x_in,
+            mid + 0.5,
+            w_in,
+            1.1,
             "Input features",
-            f"{len(self.features_.feature_names_out_)} causal predictors",
+            [f"{len(self.features_.feature_names_out_)} causal predictors"],
             "#315b7d",
         )
-        cluster_details = "\n".join(
-            f"{cluster.name_}: k={cluster.n_clusters_}, {cluster.profile}, {cluster.distance}"
-            for cluster in self.clusterers_
-        )
+        cluster_lines = [
+            f"{c.name_}: k={c.n_clusters_}, profile {c.profile}, {c.distance}" for c in self.clusterers_
+        ]
+        cluster_h = 0.7 + 0.3 * len(cluster_lines)
         cluster_box = box(
-            left_x,
-            0.08,
-            0.19,
-            0.18,
-            "Profile clusters",
-            cluster_details,
-            "#7b6b9a",
+            x_in, mid - 0.5 - cluster_h, w_in, cluster_h, "Profile clusters", cluster_lines, "#7b6b9a"
         )
+
+        clf_h = min(1.5, (height - 1.8) / n_dim - 0.3)
         classifier_boxes = []
-        for dim, clf, y_pos in zip(self.dimensions_, self.classifiers_, positions(n_dimensions), strict=True):
-            fitted = clf.estimator_
-            best_params = clf.search_.best_params_ if clf.search_ is not None else {}
-            detail = (
-                f"{type(fitted).__name__} - {len(clf.classes_)} regimes\n"
-                f"{best_params or 'default parameters'}"
+        for dim, clf, y_pos in zip(self.dimensions_, self.classifiers_, centers(n_dim, clf_h), strict=True):
+            best = clf.search_.best_params_ if clf.search_ is not None else {}
+            classifier_boxes.append(
+                box(
+                    x_clf,
+                    y_pos,
+                    w_clf,
+                    clf_h,
+                    f"Classifier: {dim}",
+                    [_model_name(clf.estimator_) + f" - {len(clf.classes_)} regimes", short(best, 44)],
+                    "#397b68",
+                )
             )
-            classifier_boxes.append(box(mid_x, y_pos, 0.23, h, f"Classifier: {dim}", detail, "#397b68"))
+
+        params = self.gating_.get_params()
+        gate_h = 0.9 + 0.3 * len(params)
         gate = box(
-            gate_x,
-            0.42,
-            0.18,
-            0.16,
+            x_gate,
+            height / 2 - 0.4 - gate_h / 2 + 0.4,
+            w_gate,
+            gate_h,
             type(self.gating_).__name__,
-            str(self.gating_.get_params()),
+            [f"{k} = {v:g}" if isinstance(v, (int, float)) else f"{k} = {v}" for k, v in params.items()],
             "#ad7133",
         )
-        expert_boxes = []
+
+        families = sorted({_model_name(self.experts_[k]) for k in self.expert_keys_})
+        color_of = {name: PALETTE[i % len(PALETTE)] for i, name in enumerate(families)}
         name_by_key = dict(zip(self.expert_keys_, self.expert_names_, strict=True))
-        for key, y_pos in zip(self.expert_keys_, positions(n_experts), strict=True):
-            estimator = self.experts_[key]
-            selected_row = self.selector_.results_.loc[
-                self.selector_.results_["expert"].map(key.__eq__) & self.selector_.results_["selected"]
-            ].iloc[0]
-            params = selected_row.get("best_params", {})
-            detail = f"{type(estimator).__name__}\n{params or 'default parameters'}"
-            expert_boxes.append(box(right_x, y_pos, 0.19, h, name_by_key[key], detail, "#9b5364"))
+        results = self.selector_.results_
+        expert_boxes = []
+        for key, y_pos in zip(self.expert_keys_, centers(n_exp, exp_h), strict=True):
+            family = _model_name(self.experts_[key])
+            row = results.loc[results["expert"].map(key.__eq__) & results["selected"]].iloc[0]
+            tuned = row.get("best_params", {})
+            tuned = tuned if isinstance(tuned, dict) else {}
+            expert_boxes.append(
+                box(
+                    x_exp,
+                    y_pos,
+                    w_exp,
+                    exp_h,
+                    name_by_key[key],
+                    [family, short(tuned) if tuned else ""],
+                    _darken(color_of[family]),
+                    title_size=9.5,
+                )
+            )
+
         for item in classifier_boxes:
             connect(feature, item)
             connect(cluster_box, item)
             connect(item, gate)
         for item in expert_boxes:
             connect(gate, item)
-        fig.suptitle("Fitted Mixture-of-Experts Architecture", fontsize=14, fontweight="bold")
-        fig.tight_layout(rect=(0, 0, 1, 0.96))
+
+        used = {_model_name(self.experts_[k]) for k in self.expert_keys_}
+        counts = {f: sum(_model_name(self.experts_[k]) == f for k in self.expert_keys_) for f in used}
+        legend = "   ".join(f"{f} x{n}" for f, n in sorted(counts.items()))
+        ax.text(
+            width / 2,
+            height - 0.3,
+            f"Fitted Mixture-of-Experts architecture - {n_exp} experts, {len(used)} model families",
+            ha="center",
+            va="top",
+            fontsize=14,
+            fontweight="bold",
+        )
+        ax.text(width / 2, 0.15, f"Expert models: {legend}", ha="center", fontsize=9, color="#34495e")
         if path is not None:
             fig.savefig(path, dpi=dpi, bbox_inches="tight", facecolor="white")
         return fig
@@ -470,6 +538,32 @@ class MoEForecaster(BaseEstimator):
         classes = [clf.classes_ for clf in self.classifiers_]
         result = self.gating_.route(probas, classes, self.expert_keys_)
         return result.weights, result
+
+
+def _model_name(estimator) -> str:
+    """Name of the model family, looking through scikit-learn pipelines."""
+    steps = getattr(estimator, "steps", None)
+    while steps:
+        estimator = steps[-1][1]
+        steps = getattr(estimator, "steps", None)
+    return type(estimator).__name__
+
+
+def _wrap_params(params: dict, limit: int) -> list[str]:
+    parts = [f"{str(k).split('__')[-1]}={v}" for k, v in params.items()]
+    lines, current = [], ""
+    for part in parts:
+        if current and len(current) + len(part) + 2 > limit:
+            lines.append(current)
+            current = part
+        else:
+            current = f"{current}, {part}" if current else part
+    return [*lines, current] if current else lines
+
+
+def _darken(color: str, factor: float = 0.62) -> str:
+    rgb = [int(color[i : i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{int(c * factor):02x}" for c in rgb)
 
 
 def _ensure_series(y, freq: str | None = None) -> pd.Series:

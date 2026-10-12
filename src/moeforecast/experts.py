@@ -89,6 +89,14 @@ class ExpertSelector(BaseEstimator):
     min_samples : int
         Regimes with fewer samples get no expert; the gating then routes their
         time steps to the remaining experts.
+    max_experts_per_model : int, "auto" or None
+        Diversity constraint. ``None`` lets every regime pick its own best
+        candidate (several experts may end up being the same model family).
+        An integer caps how many experts may use the same candidate, and
+        ``"auto"`` uses ``ceil(n_experts / n_candidates)`` so the experts are
+        spread over as many different models as possible. The assignment
+        minimises the total relative score loss (score / best score of that
+        regime), so each regime gets the best model that is still available.
     """
 
     def __init__(
@@ -103,7 +111,9 @@ class ExpertSelector(BaseEstimator):
         search_spaces: Mapping[str, Mapping[str, object]] | None = None,
         n_iter: int = 20,
         random_state: int = 0,
+        max_experts_per_model: int | str | None = None,
     ):
+        self.max_experts_per_model = max_experts_per_model
         self.candidates = candidates
         self.metric = metric
         self.n_splits = n_splits
@@ -121,6 +131,39 @@ class ExpertSelector(BaseEstimator):
             if n >= min_n:
                 allowed = subset
         return list(names) if allowed is None else [c for c in names if c in allowed]
+
+    def _assign(self, pending: dict) -> dict:
+        """Pick one candidate per expert, honouring ``max_experts_per_model``."""
+        limit = self.max_experts_per_model
+        keys = list(pending)
+        if limit is None:
+            return {k: min(pending[k][3], key=lambda name: pending[k][3][name][0]) for k in keys}
+        names = list(dict.fromkeys(name for k in keys for name in pending[k][3]))
+        if limit == "auto":
+            limit = int(np.ceil(len(keys) / len(names)))
+        if not isinstance(limit, (int, np.integer)) or limit < 1:
+            raise ValueError("max_experts_per_model must be None, 'auto' or a positive integer.")
+        if limit * len(names) < len(keys):
+            raise ValueError(
+                f"max_experts_per_model={limit} with {len(names)} candidates cannot cover "
+                f"{len(keys)} experts."
+            )
+        big = 1e6
+        cost = np.full((len(keys), len(names) * limit), big)
+        for i, k in enumerate(keys):
+            scores = pending[k][3]
+            floor = max(min(v[0] for v in scores.values()), 1e-12)
+            for j, name in enumerate(names):
+                if name in scores:
+                    cost[i, j * limit : (j + 1) * limit] = scores[name][0] / floor
+        from scipy.optimize import linear_sum_assignment
+
+        rows_idx, cols_idx = linear_sum_assignment(cost)
+        chosen = {keys[i]: names[c // limit] for i, c in zip(rows_idx, cols_idx, strict=True)}
+        for k, name in chosen.items():  # a candidate barred by `complexity` is never chosen
+            if name not in pending[k][3]:
+                chosen[k] = min(pending[k][3], key=lambda n: pending[k][3][n][0])
+        return chosen
 
     def fit(self, X: pd.DataFrame, y: pd.Series, keys: pd.Series):
         """
@@ -151,6 +194,7 @@ class ExpertSelector(BaseEstimator):
         valid = keys.notna().to_numpy() & y.notna().to_numpy() & X.notna().all(axis=1).to_numpy()
 
         rows, self.experts_, self.selected_, self.search_results_ = [], {}, {}, {}
+        pending = {}
         for key in sorted(set(keys[valid])):
             mask = valid & np.fromiter((k == key for k in keys), dtype=bool, count=len(keys))
             n = int(mask.sum())
@@ -220,7 +264,11 @@ class ExpertSelector(BaseEstimator):
                     scores[name] = (float(np.mean(fold_scores)), float(np.std(fold_scores)))
                     best_estimators[name] = clone(candidates[name]).fit(Xk, yk)
                     best_params[name] = {}
-            best = min(scores, key=lambda name: scores[name][0])  # ties: first in candidate order
+            pending[key] = (n, Xk, yk, scores, best_estimators, best_params)
+
+        chosen = self._assign(pending)
+        for key, (n, Xk, yk, scores, best_estimators, best_params) in pending.items():
+            best = chosen[key]
             for name, (mean, std) in scores.items():
                 rows.append(
                     {

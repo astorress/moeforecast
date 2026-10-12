@@ -62,3 +62,14 @@ def test_fill_gaps_respects_max_gap():
     filled = fill_gaps(y, max_gap=1)
     assert filled.iloc[1] == 2.0
     assert filled.iloc[3:6].isna().all()
+
+
+def test_calendar_frequency_is_rejected_instead_of_being_mistaken_for_hours():
+    import pandas as pd
+    import pytest
+
+    from moeforecast import prepare_series
+
+    monthly = pd.Series(range(36), index=pd.date_range("2020-01-01", periods=36, freq="MS"), dtype=float)
+    with pytest.raises(ValueError, match="no fixed duration"):
+        prepare_series(monthly)

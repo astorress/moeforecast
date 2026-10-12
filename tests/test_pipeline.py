@@ -115,4 +115,36 @@ def test_fitted_model_diagram_can_be_saved(fitted, tmp_path):
     destination = tmp_path / "moe-architecture.png"
     fig = model.plot_model(destination)
     assert destination.is_file() and destination.stat().st_size > 0
-    assert fig._suptitle.get_text() == "Fitted Mixture-of-Experts Architecture"
+    texts = [t.get_text() for t in fig.axes[0].texts]
+    assert any(t.startswith("Fitted Mixture-of-Experts architecture") for t in texts)
+    assert not any(t == "Pipeline" for t in texts)  # shows the model inside a pipeline, not "Pipeline"
+
+
+def test_diversity_constraint_spreads_experts_over_model_families(demand):
+    from moeforecast import ExpertSelector, FeatureBuilder, MoEForecaster, ProfileClusterer
+
+    model = MoEForecaster(
+        features=FeatureBuilder(lags=(1, 24, 168), rolling_windows=(24,)),
+        clusterers=[
+            ProfileClusterer("D", name="day", n_clusters=3),
+            ProfileClusterer("W", name="week", n_clusters=2),
+        ],
+        selector=ExpertSelector(n_splits=2, min_samples=30, max_experts_per_model=1),
+    ).fit(demand)
+    selected = list(model.selector_.selected_.values())
+    assert len(selected) == len(set(selected))
+
+
+def test_diversity_constraint_validates_limit(demand):
+    import pandas as pd
+    from sklearn.linear_model import Ridge
+
+    from moeforecast import ExpertSelector, FeatureBuilder
+
+    X = FeatureBuilder(lags=(1, 24), rolling_windows=()).fit(demand).transform(demand).dropna()
+    y = demand.loc[X.index]
+    keys = pd.Series([(i % 12,) for i in range(len(X))], index=X.index, dtype=object)
+    with pytest.raises(ValueError):
+        ExpertSelector(max_experts_per_model=0).fit(X, y, keys)
+    with pytest.raises(ValueError):
+        ExpertSelector(candidates={"a": Ridge()}, max_experts_per_model=1).fit(X, y, keys)
