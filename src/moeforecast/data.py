@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 import pandas as pd
@@ -54,6 +55,7 @@ def prepare_series(
     time_col: str | None = None,
     freq: str | None = None,
     return_report: bool = False,
+    warn_on_gaps: bool = True,
 ) -> pd.Series | tuple[pd.Series, DataReport]:
     """
     Check and regularize a time series.
@@ -71,6 +73,9 @@ def prepare_series(
         Sampling frequency (e.g. ``"h"``). Inferred from the data when omitted.
     return_report : bool
         Also return a :class:`DataReport`.
+    warn_on_gaps : bool
+        Emit a ``UserWarning`` when the regularized series contains missing
+        values. Missing values are never imputed automatically.
 
     Returns
     -------
@@ -122,8 +127,6 @@ def prepare_series(
     y = y.asfreq(freq)
     y.name = target or y.name or "y"
 
-    if not return_report:
-        return y
     missing = y.isna()
     gaps = _gap_lengths(missing)
     report = DataReport(
@@ -135,6 +138,17 @@ def prepare_series(
         n_gaps=len(gaps),
         longest_gap=int(gaps.max()) if len(gaps) else 0,
     )
+    if warn_on_gaps and report.n_missing:
+        warnings.warn(
+            f"prepare_series found {report.n_missing} missing value(s) across "
+            f"{report.n_gaps} gap(s) (longest: {report.longest_gap} steps). "
+            "Review the returned series and decide whether to impute them; "
+            "see moeforecast.fill_gaps. No values were imputed.",
+            UserWarning,
+            stacklevel=2,
+        )
+    if not return_report:
+        return y
     return y, report
 
 

@@ -30,11 +30,22 @@ def test_prepare_series_from_dataframe_reports_gaps():
     idx = pd.date_range("2024-01-01", periods=48, freq="h")
     df = pd.DataFrame({"time": idx, "load": np.arange(48.0)}).drop(index=[5, 6, 20])
     y, report = prepare_series(
-        df.sample(frac=1, random_state=0), target="load", time_col="time", return_report=True
+        df.sample(frac=1, random_state=0),
+        target="load",
+        time_col="time",
+        return_report=True,
+        warn_on_gaps=False,
     )
     assert y.index.freqstr == "h" and len(y) == 48 and y.name == "load"
     assert y.index.is_monotonic_increasing
     assert report.n_missing == 3 and report.n_gaps == 2 and report.longest_gap == 2
+
+
+def test_prepare_series_warns_but_does_not_impute_gaps():
+    idx = pd.date_range("2024-01-01", periods=5, freq="h").delete(2)
+    with pytest.warns(UserWarning, match="No values were imputed"):
+        y = prepare_series(pd.Series(np.arange(4.0), index=idx), freq="h")
+    assert y.isna().sum() == 1
 
 
 def test_prepare_series_rejects_duplicates():

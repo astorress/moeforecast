@@ -9,35 +9,43 @@ import pandas as pd
 from sklearn.base import BaseEstimator, clone
 from sklearn.ensemble import (
     ExtraTreesRegressor,
+    GradientBoostingRegressor,
     HistGradientBoostingRegressor,
     RandomForestRegressor,
 )
-from sklearn.linear_model import ElasticNet, Ridge
+from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, Ridge
 from sklearn.model_selection import TimeSeriesSplit
+from sklearn.neighbors import KNeighborsRegressor
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVR
 
-from moeforecast.metrics import mae, rmse
+from moeforecast.metrics import mae, mape, rmse
 
 ExpertKey = tuple[int, ...]
 """Identifier of an expert: one cluster label per regime dimension, e.g. (0, 1)."""
 
 # (minimum number of samples, allowed candidates; None = all). The last row whose
 # minimum is <= n applies. Keeps flexible models away from small regimes.
-DEFAULT_COMPLEXITY: tuple[tuple[int, tuple[str, ...] | None], ...] = (
-    (0, ("ridge",)),
-    (200, ("ridge", "elasticnet", "hist_gbm")),
-    (1000, None),
-)
+DEFAULT_COMPLEXITY: tuple[tuple[int, tuple[str, ...] | None], ...] = ((0, None),)
 
-_METRICS = {"mae": mae, "rmse": rmse}
+_METRICS = {"mae": mae, "rmse": rmse, "mape": mape}
 
 
-def default_candidates(random_state: int = 0) -> dict[str, BaseEstimator]:
-    """Candidate expert models. LightGBM is included when it is installed."""
+def default_candidates(
+    random_state: int = 0,
+    *,
+    exclude: Sequence[str] = (),
+    extra: Mapping[str, BaseEstimator] | None = None,
+) -> dict[str, BaseEstimator]:
+    """Return ten standard regressors, optionally excluding or adding models."""
     candidates = {
+        "linear": LinearRegression(),
         "ridge": make_pipeline(StandardScaler(), Ridge(alpha=1.0)),
         "elasticnet": make_pipeline(StandardScaler(), ElasticNet(alpha=0.01, max_iter=5000)),
+        "lasso": make_pipeline(StandardScaler(), Lasso(alpha=0.01, max_iter=5000)),
+        "svr": make_pipeline(StandardScaler(), SVR(C=1.0, epsilon=0.1)),
+        "knn": make_pipeline(StandardScaler(), KNeighborsRegressor(n_neighbors=5)),
         "random_forest": RandomForestRegressor(
             n_estimators=300, min_samples_leaf=3, n_jobs=-1, random_state=random_state
         ),
@@ -45,15 +53,11 @@ def default_candidates(random_state: int = 0) -> dict[str, BaseEstimator]:
             n_estimators=300, min_samples_leaf=3, n_jobs=-1, random_state=random_state
         ),
         "hist_gbm": HistGradientBoostingRegressor(random_state=random_state),
+        "gradient_boosting": GradientBoostingRegressor(random_state=random_state),
     }
-    try:
-        from lightgbm import LGBMRegressor
-
-        candidates["lightgbm"] = LGBMRegressor(
-            n_estimators=500, learning_rate=0.05, random_state=random_state, verbose=-1
-        )
-    except ImportError:
-        pass
+    candidates.update(extra or {})
+    for name in exclude:
+        candidates.pop(name, None)
     return candidates
 
 
@@ -75,7 +79,7 @@ class ExpertSelector(BaseEstimator):
     ----------
     candidates : mapping name -> regressor, optional
         Defaults to :func:`default_candidates`.
-    metric : {"mae", "rmse"}
+    metric : {"mae", "rmse", "mape"}
         Selection metric (lower is better).
     n_splits : int
         Number of forward-chaining folds per regime.
@@ -93,12 +97,14 @@ class ExpertSelector(BaseEstimator):
         n_splits: int = 3,
         complexity: Sequence[tuple[int, Sequence[str] | None]] = DEFAULT_COMPLEXITY,
         min_samples: int = 50,
+        candidate_mode: str = "replace",
     ):
         self.candidates = candidates
         self.metric = metric
         self.n_splits = n_splits
         self.complexity = complexity
         self.min_samples = min_samples
+        self.candidate_mode = candidate_mode
 
     def allowed_candidates(self, n: int, names: Sequence[str]) -> list[str]:
         allowed = None
@@ -117,7 +123,16 @@ class ExpertSelector(BaseEstimator):
         """
         if self.metric not in _METRICS:
             raise ValueError(f"metric must be one of {sorted(_METRICS)}")
-        candidates = dict(self.candidates or default_candidates())
+        if self.candidate_mode not in {"replace", "extend"}:
+            raise ValueError("candidate_mode must be 'replace' or 'extend'.")
+        if self.candidates is None:
+            candidates = default_candidates()
+        elif self.candidate_mode == "extend":
+            candidates = {**default_candidates(), **self.candidates}
+        else:
+            candidates = dict(self.candidates)
+        if not candidates:
+            raise ValueError("At least one expert candidate is required.")
         self.candidate_estimators_ = {name: clone(model) for name, model in candidates.items()}
         score_fn = _METRICS[self.metric]
         valid = keys.notna().to_numpy() & y.notna().to_numpy() & X.notna().all(axis=1).to_numpy()

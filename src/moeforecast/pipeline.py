@@ -16,10 +16,6 @@ from moeforecast.features import FeatureBuilder
 from moeforecast.gating import AdaptiveGating
 
 
-def _default_clusterers() -> list[ProfileClusterer]:
-    return [ProfileClusterer("D", name="day"), ProfileClusterer("W", name="week")]
-
-
 class MoEForecaster(BaseEstimator):
     """
     Mixture-of-Experts one-step-ahead forecaster.
@@ -42,7 +38,8 @@ class MoEForecaster(BaseEstimator):
     ----------
     features : FeatureBuilder, optional
     clusterers : sequence of ProfileClusterer, optional
-        Defaults to daily ("D") and weekly ("W") profiles.
+        Required. Evaluate candidate cluster counts, inspect validation plots,
+        then pass fitted clusterer configurations with explicit ``n_clusters``.
     classifier : classifier with predict_proba, optional
         Estimator used by every RegimeClassifier.
     classifier_features : sequence of str, optional
@@ -74,7 +71,12 @@ class MoEForecaster(BaseEstimator):
         self.features_ = clone(self.features or FeatureBuilder()).fit(y)
         X = self.features_.transform(y)
 
-        self.clusterers_ = [clone(c).fit(y) for c in (self.clusterers or _default_clusterers())]
+        if not self.clusterers:
+            raise ValueError(
+                "Pass clusterers with explicit n_clusters. Use ProfileClusterer.evaluate(y) and "
+                "its validation plots to choose the cluster counts first."
+            )
+        self.clusterers_ = [clone(c).fit(y) for c in self.clusterers]
         self.dimensions_ = [c.name_ for c in self.clusterers_]
         if len(set(self.dimensions_)) != len(self.dimensions_):
             raise ValueError(f"Clusterer names must be unique, got {self.dimensions_}")

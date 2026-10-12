@@ -8,19 +8,13 @@
 
 ```python
 import pandas as pd
-from moeforecast import MoEForecaster, prepare_series, temporal_train_test_split
-from moeforecast.metrics import mae, mase
+from moeforecast import prepare_series, temporal_train_test_split
 
 df = pd.read_csv("load.csv")  # your data
 y = prepare_series(df, target="load", time_col="timestamp")  # regular, sorted series
 
 train, test = temporal_train_test_split(y, test_size="2025-01-01")
-model = MoEForecaster().fit(train)
-
-pred = model.predict(y)[test.index]  # one-step-ahead on the test period
-print(mae(test, pred), mase(test, pred, train, m=168))
-
-next_week = model.forecast(y, steps=168)  # recursive multi-step forecast
+# Continue with the analysis and cluster-selection workflow below.
 ```
 
 ## What the library does (and does not do)
@@ -29,13 +23,13 @@ next_week = model.forecast(y, steps=168)  # recursive multi-step forecast
 
 | Step | Tool | What it gives you |
 |---|---|---|
-| 1. Prepare the data | `prepare_series`, `fill_gaps` | Sorted series on a regular grid; report of missing values and gaps |
+| 1. Prepare the data | `prepare_series`, `fill_gaps` | Sorted series on a regular grid; warns about gaps and never imputes silently |
 | 2. Analyse the series | `SeriesAnalyzer` | Suggested seasonal periods and lags (ACF/PACF); ACF/PACF, seasonal-profile and MSTL plots |
 | 3. Build features | `FeatureBuilder` | Causal calendar, Fourier, holiday (any country), lag and rolling features. The same code serves training, prediction and forecasting |
 | 4. Rank features | `feature_relevance` | Mutual information or permutation importance |
-| 5. Find regimes | `ProfileClusterer` | Clusters of daily/weekly/... profiles, choice of k, profile and metric plots |
+| 5. Find regimes | `ProfileClusterer` | Daily, weekly or monthly profile diagnostics, distance choice, silhouette plots and explicit selection of k |
 | 6. Predict regimes | `RegimeClassifier`, `compare_classifiers` | Regime probabilities for the gating; time-ordered comparison of classifiers |
-| 7. Train experts | `ExpertSelector` | Best candidate model per regime (forward-chaining CV), with complexity limits for small regimes |
+| 7. Train experts | `ExpertSelector` | Best candidate model per regime (forward-chaining CV); ten default regressors, user additions/removals and MAE/RMSE/MAPE selection |
 | 8. Combine experts | `HardGating`, `SoftGating`, `AdaptiveGating` | Expert weights per time step |
 | 9. All together | `MoEForecaster` | `fit`, `predict`, `predict_with_metadata`, `expert_weights`, `forecast` |
 | 10. Persist | `save`, `load` | Serialization with version check |
@@ -45,6 +39,7 @@ next_week = model.forecast(y, steps=168)  # recursive multi-step forecast
 
 ```bash
 pip install "moeforecast[all]"          # with LightGBM and public holidays
+pip install "moeforecast[dtw]"          # optional DTW profile clustering
 pip install moeforecast                 # core only: numpy, pandas, scikit-learn, statsmodels, matplotlib
 ```
 
@@ -81,11 +76,18 @@ features = FeatureBuilder(lags=analysis.suggested_lags_, fourier_periods=(24, 16
 X = features.fit(train).transform(train)
 feature_relevance(X, train, method="permutation").head(15)
 
-# 3. Regimes
-days = ProfileClusterer("D", name="day").fit(train)
-weeks = ProfileClusterer("W", name="week", n_clusters=2).fit(train)
+# 3. Inspect cluster-validation metrics before choosing the cluster count.
+days = ProfileClusterer("D", name="day", k_range=range(2, 11))
+days.evaluate(train)
 days.plot_scores()
+days.plot_silhouette()  # inspect all candidate k values before deciding
+days.set_params(n_clusters=3).fit(train)  # choose k after reviewing the scores
 days.plot_profiles()
+
+weeks = ProfileClusterer("W", name="week", k_range=range(2, 11))
+weeks.evaluate(train)
+weeks.plot_scores()
+weeks.set_params(n_clusters=2).fit(train)
 
 # 4. Can the regimes be predicted from the features?
 compare_classifiers(X, days.labels_for(train.index))

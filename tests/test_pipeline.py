@@ -83,6 +83,11 @@ def test_inspect_requires_fitted_model():
         MoEForecaster().inspect()
 
 
+def test_pipeline_requires_explicitly_reviewed_clusterers(demand):
+    with pytest.raises(ValueError, match="Pass clusterers with explicit n_clusters"):
+        MoEForecaster().fit(demand)
+
+
 def test_forecast_and_persistence(fitted, demand, tmp_path):
     model, train, test = fitted
     fc = model.forecast(train, steps=48)

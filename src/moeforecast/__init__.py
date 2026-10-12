@@ -18,12 +18,13 @@ forecaster from a single time series:
 """
 
 from moeforecast.analysis import SeriesAnalyzer, feature_relevance
-from moeforecast.classification import RegimeClassifier, compare_classifiers
+from moeforecast.classification import RegimeClassifier, compare_classifiers, default_classifiers
 from moeforecast.clustering import ProfileClusterer
 from moeforecast.data import DataReport, fill_gaps, prepare_series
 from moeforecast.experts import ExpertSelector, default_candidates
 from moeforecast.features import FeatureBuilder
 from moeforecast.gating import AdaptiveGating, HardGating, SoftGating
+from moeforecast.metrics import mape
 from moeforecast.model_selection import temporal_train_test_split
 from moeforecast.persistence import load, save
 from moeforecast.pipeline import MoEForecaster
@@ -42,10 +43,12 @@ __all__ = [
     "SeriesAnalyzer",
     "SoftGating",
     "compare_classifiers",
+    "default_classifiers",
     "default_candidates",
     "feature_relevance",
     "fill_gaps",
     "load",
+    "mape",
     "prepare_series",
     "save",
     "temporal_train_test_split",

@@ -17,7 +17,7 @@ The library covers **building** the model: data preparation, analysis to choose 
 | 5 | HPO parameters were saved as `reg__alpha` and read as `alpha`; several were silently dropped or swapped for another model family. | Experts are scikit-learn estimators passed and cloned whole, so their parameters travel with them. (HPO on the roadmap will use the same estimator objects.) |
 | 6 | The gating tuned in one notebook (centroid distance softmax) was not the one used in production (classifier confidence). | A single gating object, `MoEForecaster.gating`, is used both to evaluate and to predict. |
 | 9 | Clustering ran on raw profiles while the documentation and metadata said "z-normalized". | `ProfileClusterer(normalize=None | "zscore" | "mean")` is an explicit parameter, stored on the object. |
-| 10 | The number of clusters was overridden by hand and the summary printed metrics of another configuration. | `n_clusters` fixes k explicitly; otherwise it is chosen by `selection_metric`. `scores_` holds every candidate k. |
+| 10 | The number of clusters was overridden by hand and the summary printed metrics of another configuration. | `evaluate(y)` returns candidate metrics without fitting final clusters. Users inspect the plots, choose `n_clusters`, then call `fit`; automatic selection requires explicit `auto_select=True`. |
 | 11 | Classifier CV used shuffled stratified folds, mixing hours of the same day across folds. | `compare_classifiers` uses `TimeSeriesSplit` (with an optional gap). |
 | 12 | Distance-based soft gating compared feature vectors with centroids from another space. | The gating uses the classifiers' probabilities only. |
 | 13 | `is_bridge` and other features were computed differently for training and for forecasting. | One `FeatureBuilder.transform` for all uses. Holiday features come from the `holidays` package for any country. |
@@ -30,9 +30,9 @@ Issues 7, 8 and the remaining ones in notebook 09 (statistical tests, hard-coded
 
 ## Components and their contracts
 
-- **`prepare_series`** returns a float Series on a regular grid (missing steps are NaN) with `index.freq` set. Every other component expects this.
+- **`prepare_series`** returns a float Series on a regular grid (missing steps are NaN) with `index.freq` set, warns about gaps, and never imputes automatically. Every other component expects this.
 - **`FeatureBuilder`** is a scikit-learn transformer. `transform(y)` returns features aligned with `y.index`. Rows without enough history contain NaN and are skipped by every consumer.
-- **`ProfileClusterer`** clusters complete calendar periods (`"D"`, `"W"`, ...). `labels_for(index)` maps timestamps to regime labels.
+- **`ProfileClusterer`** validates and clusters complete daily, weekly or monthly profiles. Euclidean distance is built in; DTW is an optional extra. `labels_for(index)` maps timestamps to regime labels.
 - **`RegimeClassifier`** wraps any classifier with `predict_proba`. The gating aligns probabilities by `classes_`, so a regime missing from training gets zero weight.
 - **`ExpertSelector`** follows the rule *candidates allowed by complexity → forward-chaining CV → best by metric → refit on the whole regime*.
 - **Gating** maps per-dimension probabilities to weights over the existing experts. Weights are re-normalized over the experts that exist, so a missing combination never routes to nothing.

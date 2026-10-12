@@ -14,15 +14,24 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 
-def default_classifiers(random_state: int = 0) -> dict[str, BaseEstimator]:
-    """Candidate regime classifiers. All implement ``predict_proba``."""
-    return {
+def default_classifiers(
+    random_state: int = 0,
+    *,
+    exclude: Sequence[str] = (),
+    extra: Mapping[str, BaseEstimator] | None = None,
+) -> dict[str, BaseEstimator]:
+    """Return standard probability-capable classifiers with add/remove options."""
+    classifiers = {
         "logistic": make_pipeline(StandardScaler(), LogisticRegression(max_iter=2000)),
         "random_forest": RandomForestClassifier(
             n_estimators=300, min_samples_leaf=5, n_jobs=-1, random_state=random_state
         ),
         "hist_gbm": HistGradientBoostingClassifier(random_state=random_state),
     }
+    classifiers.update(extra or {})
+    for name in exclude:
+        classifiers.pop(name, None)
+    return classifiers
 
 
 class RegimeClassifier(ClassifierMixin, BaseEstimator):
@@ -69,6 +78,7 @@ def compare_classifiers(
     feature_sets: Mapping[str, Sequence[str]] | None = None,
     n_splits: int = 5,
     gap: int = 0,
+    candidate_mode: str = "replace",
 ) -> pd.DataFrame:
     """
     Cross-validate regime classifiers with forward-chaining (time-ordered) splits.
@@ -79,7 +89,14 @@ def compare_classifiers(
     Returns a DataFrame with mean and std of accuracy and macro F1 per
     (feature set, classifier), sorted by macro F1.
     """
-    candidates = candidates or default_classifiers()
+    if candidate_mode not in {"replace", "extend"}:
+        raise ValueError("candidate_mode must be 'replace' or 'extend'.")
+    if candidates is None:
+        candidates = default_classifiers()
+    elif candidate_mode == "extend":
+        candidates = {**default_classifiers(), **candidates}
+    if not candidates:
+        raise ValueError("At least one classifier candidate is required.")
     feature_sets = feature_sets or {"all": list(X.columns)}
     cv = TimeSeriesSplit(n_splits=n_splits, gap=gap)
     rows = []
