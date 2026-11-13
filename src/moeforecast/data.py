@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 import pandas as pd
@@ -32,8 +33,10 @@ def step_of(freq: str) -> pd.Timedelta:
     """Duration of one step of a fixed frequency such as 'h', '15min' or 'D'."""
     offset = to_offset(freq)
     try:
-        return pd.Timedelta(offset)
-    except ValueError as err:
+        # Convert through nanoseconds: pandas 3 no longer accepts a Day offset
+        # directly in Timedelta, although it is a fixed-duration frequency.
+        return pd.Timedelta(offset.nanos, unit="ns")
+    except (AttributeError, ValueError) as err:
         raise ValueError(
             f"Frequency '{freq}' has no fixed duration. moeforecast supports fixed "
             "frequencies such as 'min', 'h' or 'D'."
@@ -52,6 +55,7 @@ def prepare_series(
     time_col: str | None = None,
     freq: str | None = None,
     return_report: bool = False,
+    warn_on_gaps: bool = True,
 ) -> pd.Series | tuple[pd.Series, DataReport]:
     """
     Check and regularize a time series.
@@ -69,6 +73,9 @@ def prepare_series(
         Sampling frequency (e.g. ``"h"``). Inferred from the data when omitted.
     return_report : bool
         Also return a :class:`DataReport`.
+    warn_on_gaps : bool
+        Emit a ``UserWarning`` when the regularized series contains missing
+        values. Missing values are never imputed automatically.
 
     Returns
     -------
@@ -115,13 +122,17 @@ def prepare_series(
         deltas = y.index.to_series().diff().dropna()
         if deltas.empty:
             raise ValueError("Cannot infer the frequency of a single timestamp; pass `freq`.")
-        freq = to_offset(deltas.mode().iloc[0]).freqstr
+        # A calendar frequency (e.g. month starts) must not be mistaken for its most common
+        # spacing in hours: pd.infer_freq reports it, and step_of() below rejects it clearly.
+        try:
+            exact = pd.infer_freq(y.index) if len(y.index) >= 3 else None
+        except (TypeError, ValueError):
+            exact = None
+        freq = exact or to_offset(deltas.mode().iloc[0]).freqstr
     step_of(freq)  # validate
     y = y.asfreq(freq)
     y.name = target or y.name or "y"
 
-    if not return_report:
-        return y
     missing = y.isna()
     gaps = _gap_lengths(missing)
     report = DataReport(
@@ -133,6 +144,17 @@ def prepare_series(
         n_gaps=len(gaps),
         longest_gap=int(gaps.max()) if len(gaps) else 0,
     )
+    if warn_on_gaps and report.n_missing:
+        warnings.warn(
+            f"prepare_series found {report.n_missing} missing value(s) across "
+            f"{report.n_gaps} gap(s) (longest: {report.longest_gap} steps). "
+            "Review the returned series and decide whether to impute them; "
+            "see moeforecast.fill_gaps. No values were imputed.",
+            UserWarning,
+            stacklevel=2,
+        )
+    if not return_report:
+        return y
     return y, report
 
 

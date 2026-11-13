@@ -34,3 +34,9 @@ def test_class_missing_from_classifier_gets_zero_weight():
     probas = [np.ones((2, 1)), np.array([[0.5, 0.5], [0.2, 0.8]])]
     joint = joint_probabilities(probas, classes, KEYS)
     assert np.allclose(joint[:, 2], 0)
+
+
+def test_temperature_controls_soft_probability_concentration():
+    cold = SoftGating(min_weight=0, temperature=0.5).route(PROBAS, CLASSES, KEYS).weights
+    warm = SoftGating(min_weight=0, temperature=2.0).route(PROBAS, CLASSES, KEYS).weights
+    assert np.all(cold.max(axis=1) >= warm.max(axis=1))

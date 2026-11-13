@@ -28,7 +28,7 @@ def fitted(demand):
 
 
 def test_experts_are_routed_not_averaged(fitted, demand):
-    """Bug fixed: expert ids built in two formats made every prediction a plain average."""
+    """Each hour is routed to its experts instead of averaging all of them."""
     model, train, test = fitted
     _, meta = model.predict_with_metadata(demand)
     meta = meta.loc[test.index]
@@ -51,6 +51,43 @@ def test_training_does_not_see_test_period(fitted):
         assert clusterer.labels_.index.to_timestamp().max() < test.index[0]
 
 
+def test_inspect_exposes_fitted_models_and_diagnostics(fitted):
+    model, _, _ = fitted
+    report = model.inspect()
+
+    assert report["features"] == model.features_.feature_names_out_
+    assert report["regime_labels"].equals(model.regime_labels_)
+    assert set(report["clusters"]) == set(model.dimensions_)
+    for clusterer in model.clusterers_:
+        cluster = report["clusters"][clusterer.name_]
+        assert cluster["estimator"] is clusterer.kmeans_
+        assert cluster["assignments"].equals(clusterer.labels_)
+        assert cluster["summary"].equals(clusterer.summary())
+
+    for dimension, classifier in zip(model.dimensions_, model.classifiers_, strict=True):
+        details = report["classifiers"][dimension]
+        assert details["estimator"] is classifier.estimator_
+        assert details["class_counts"].sum() == details["n_samples_fit"]
+
+    assert report["expert_selection"]["expert_name"].notna().all()
+    assert set(report["experts"]) == set(model.expert_names_)
+    assert all(
+        report["experts"][name] is model.experts_[key]
+        for name, key in zip(model.expert_names_, model.expert_keys_, strict=True)
+    )
+    assert set(report["candidate_experts"]) == set(model.selector_.candidate_estimators_)
+
+
+def test_inspect_requires_fitted_model():
+    with pytest.raises(RuntimeError, match="must be fitted"):
+        MoEForecaster().inspect()
+
+
+def test_pipeline_requires_explicitly_reviewed_clusterers(demand):
+    with pytest.raises(ValueError, match="Pass clusterers with explicit n_clusters"):
+        MoEForecaster().fit(demand)
+
+
 def test_forecast_and_persistence(fitted, demand, tmp_path):
     model, train, test = fitted
     fc = model.forecast(train, steps=48)
@@ -58,3 +95,56 @@ def test_forecast_and_persistence(fitted, demand, tmp_path):
     path = save(model, tmp_path / "model.joblib")
     again = load(path)
     assert np.allclose(again.predict(demand).dropna(), model.predict(demand).dropna())
+
+
+def test_gating_hpo_uses_later_validation_and_returns_ranked_scores(fitted, tmp_path):
+    model, _, validation = fitted
+    scores = model.tune_gating(
+        validation,
+        search="grid",
+        thresholds=(0.5, 0.8),
+        min_weights=(0.0, 0.1),
+    )
+    assert len(scores) == 12
+    assert scores.iloc[0]["mae_validation"] <= scores.iloc[-1]["mae_validation"]
+    assert model.gating_.threshold == scores.iloc[0]["threshold"]
+
+
+def test_fitted_model_diagram_can_be_saved(fitted, tmp_path):
+    model, _, _ = fitted
+    destination = tmp_path / "moe-architecture.png"
+    fig = model.plot_model(destination)
+    assert destination.is_file() and destination.stat().st_size > 0
+    texts = [t.get_text() for t in fig.axes[0].texts]
+    assert any(t.startswith("Fitted Mixture-of-Experts architecture") for t in texts)
+    assert not any(t == "Pipeline" for t in texts)  # shows the model inside a pipeline, not "Pipeline"
+
+
+def test_diversity_constraint_spreads_experts_over_model_families(demand):
+    from moeforecast import ExpertSelector, FeatureBuilder, MoEForecaster, ProfileClusterer
+
+    model = MoEForecaster(
+        features=FeatureBuilder(lags=(1, 24, 168), rolling_windows=(24,)),
+        clusterers=[
+            ProfileClusterer("D", name="day", n_clusters=3),
+            ProfileClusterer("W", name="week", n_clusters=2),
+        ],
+        selector=ExpertSelector(n_splits=2, min_samples=30, max_experts_per_model=1),
+    ).fit(demand)
+    selected = list(model.selector_.selected_.values())
+    assert len(selected) == len(set(selected))
+
+
+def test_diversity_constraint_validates_limit(demand):
+    import pandas as pd
+    from sklearn.linear_model import Ridge
+
+    from moeforecast import ExpertSelector, FeatureBuilder
+
+    X = FeatureBuilder(lags=(1, 24), rolling_windows=()).fit(demand).transform(demand).dropna()
+    y = demand.loc[X.index]
+    keys = pd.Series([(i % 12,) for i in range(len(X))], index=X.index, dtype=object)
+    with pytest.raises(ValueError):
+        ExpertSelector(max_experts_per_model=0).fit(X, y, keys)
+    with pytest.raises(ValueError):
+        ExpertSelector(candidates={"a": Ridge()}, max_experts_per_model=1).fit(X, y, keys)

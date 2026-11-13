@@ -38,6 +38,29 @@ def test_plots_render(demand):
     an.plot_acf_pacf()
     an.plot_seasonal_profiles()
     an.plot_decomposition(periods=[24, 168])
-    pc = ProfileClusterer("D", k_range=range(2, 5)).fit(demand)
+    pc = ProfileClusterer("D", n_clusters=3).fit(demand)
+    pc.plot_silhouette()
     pc.plot_profiles()
     pc.plot_scores()
+
+
+def test_acf_pacf_plot_is_limited_to_30_lags_by_default(demand):
+    an = SeriesAnalyzer().fit(demand)
+    axes = an.plot_acf_pacf()
+    assert all(ax.get_xlim()[1] == 30 for ax in axes)
+    assert all(not ax.spines["top"].get_visible() for ax in axes)
+    assert all(ax.title.get_fontfamily() == ["serif"] for ax in axes)
+
+
+def test_decomposition_has_one_labeled_panel_per_component(demand):
+    analyzer = SeriesAnalyzer().fit(demand)
+    fig = analyzer.plot_decomposition(periods=[24, 168])
+    assert [ax.get_title(loc="left") for ax in fig.axes] == [
+        "Observed",
+        "Trend",
+        "Seasonal - 24 steps",
+        "Seasonal - 168 steps",
+        "Residual",
+    ]
+    assert all(ax.lines and ax.get_shared_x_axes().joined(ax, fig.axes[0]) for ax in fig.axes)
+    assert all(not ax.spines["top"].get_visible() for ax in fig.axes)

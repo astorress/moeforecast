@@ -36,6 +36,7 @@ jobs:
       name: testpypi
       url: https://test.pypi.org/p/moeforecast
     permissions:
+      contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4

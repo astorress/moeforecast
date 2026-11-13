@@ -15,7 +15,7 @@ def test_features_are_causal(demand):
 
 
 def test_fourier_terms_do_not_depend_on_series_start(demand):
-    """Bug fixed: Fourier phase was counted from the first row of the training data."""
+    """Fourier phase is anchored to a fixed origin, not to the first row of the training data."""
     fb = FeatureBuilder(fourier_periods=(168,), lags=(1,), rolling_windows=()).fit(demand)
     full = fb.transform(demand)
     tail = fb.transform(demand.iloc[500:])

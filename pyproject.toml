@@ -9,11 +9,11 @@ description = "Mixture-of-Experts time series forecasting with regime clustering
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [{ name = "Sebastián Torres", email = "anderson.torress@udea.edu.co" }]
+authors = [{ name = "Sebastián Torres", email = "sebastiantorres8800@gmail.com" }]
 requires-python = ">=3.10"
 keywords = ["forecasting", "time series", "mixture of experts", "clustering", "load forecasting", "scikit-learn"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -34,6 +34,7 @@ dependencies = [
 holidays = ["holidays>=0.40"]
 lightgbm = ["lightgbm>=4.0"]
 all = ["holidays>=0.40", "lightgbm>=4.0"]
+dtw = ["tslearn>=0.6.3"]
 dev = ["pytest>=7.4", "pytest-cov>=4.1", "ruff>=0.5", "holidays>=0.40", "lightgbm>=4.0"]
 
 [project.urls]

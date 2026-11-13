@@ -16,6 +16,7 @@ from sklearn.feature_selection import mutual_info_regression
 from sklearn.inspection import permutation_importance
 from statsmodels.tsa.stattools import acf, pacf
 
+from moeforecast._plotting import PALETTE, style_axis
 from moeforecast.data import step_of
 
 
@@ -81,21 +82,39 @@ class SeriesAnalyzer:
         )
 
     # ----------------------------------------------------------------- plotting
-    def plot_acf_pacf(self, axes=None):
+    def plot_acf_pacf(self, axes=None, max_lag: int = 30):
+        """Plot at most ``max_lag`` ACF/PACF steps (30 by default)."""
         import matplotlib.pyplot as plt
 
+        if max_lag < 1:
+            raise ValueError("max_lag must be a positive integer.")
         if axes is None:
-            _, axes = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
+            _, axes = plt.subplots(2, 1, figsize=(12, 6), sharex=True, layout="constrained")
         for ax, series, title in (
             (axes[0], self.acf_, "Autocorrelation (ACF)"),
             (axes[1], self.pacf_, "Partial autocorrelation (PACF)"),
         ):
-            ax.vlines(series.index, 0, series.to_numpy(), linewidth=0.8)
-            ax.axhspan(-self.confidence_bound_, self.confidence_bound_, color="gray", alpha=0.2)
-            ax.set_title(title)
+            visible = series.iloc[: max_lag + 1]
+            ax.axhspan(
+                -self.confidence_bound_,
+                self.confidence_bound_,
+                color=PALETTE[2],
+                alpha=0.22,
+                label="95% bound",
+            )
+            ax.vlines(visible.index, 0, visible.to_numpy(), color=PALETTE[0], linewidth=1.2)
+            ax.scatter(visible.index, visible.to_numpy(), color=PALETTE[0], s=15, zorder=3)
+            ax.axhline(0, color="#404040", linewidth=0.8)
+            ax.set_xlim(0, max_lag)
+            ax.set_ylabel("Correlation")
+            ax.set_title(title, loc="left", fontweight="bold")
+            style_axis(ax)
         for period in self.suggested_periods_:
-            axes[0].axvline(period, color="C3", linestyle="--", linewidth=1)
+            if period <= max_lag:
+                axes[0].axvline(period, color="#b85c5c", linestyle="--", linewidth=1.2)
         axes[1].set_xlabel("Lag (steps)")
+        axes[0].set_xlabel("Lag (steps)")
+        axes[0].legend(frameon=False, loc="upper right")
         return axes
 
     def plot_seasonal_profiles(self, axes=None):
@@ -103,26 +122,98 @@ class SeriesAnalyzer:
         import matplotlib.pyplot as plt
 
         y = self.y_.dropna()
-        groups = {"Hour of day": y.index.hour, "Day of week": y.index.dayofweek, "Month": y.index.month}
+        groups = {
+            "Hour of day": (y.index.hour, [f"{h:02d}" for h in range(24)]),
+            "Day of week": (y.index.dayofweek, ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]),
+            "Month": (
+                y.index.month - 1,
+                ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+            ),
+        }
         if pd.Timedelta("1D") / step_of(self.y_.index.freqstr) <= 1:
             groups.pop("Hour of day")
         if axes is None:
-            _, axes = plt.subplots(1, len(groups), figsize=(5 * len(groups), 3.5))
-        for ax, (title, key) in zip(np.atleast_1d(axes), groups.items(), strict=True):
-            frame = pd.DataFrame({"y": y.to_numpy(), "g": key})
-            frame.boxplot(column="y", by="g", ax=ax, showfliers=False)
-            ax.set_title(title)
+            _, axes = plt.subplots(1, len(groups), figsize=(5.5 * len(groups), 4), layout="constrained")
+        for ax, (title, (key, tick_labels)) in zip(np.atleast_1d(axes), groups.items(), strict=True):
+            frame = pd.DataFrame({"y": y.to_numpy(), "g": key}, index=y.index)
+            present = sorted(frame["g"].unique())
+            box = ax.boxplot(
+                [frame.loc[frame["g"] == group, "y"].to_numpy() for group in present],
+                patch_artist=True,
+                showfliers=False,
+                medianprops={"color": "#17324d", "linewidth": 1.8},
+                whiskerprops={"color": "#566573"},
+                capprops={"color": "#566573"},
+            )
+            for i, patch in enumerate(box["boxes"]):
+                patch.set_facecolor(PALETTE[i % len(PALETTE)])
+                patch.set_alpha(0.8)
+            medians = frame.groupby("g", sort=True)["y"].median().reindex(present)
+            ax.plot(
+                range(1, len(present) + 1),
+                medians.to_numpy(),
+                color="#c44536",
+                marker="o",
+                linewidth=2,
+                markersize=4,
+                label="Group median",
+                zorder=4,
+            )
+            ax.set_xticks(range(1, len(present) + 1), [tick_labels[i] for i in present])
+            ax.set_title(title, loc="left", fontweight="bold")
             ax.set_xlabel("")
-        plt.suptitle("")
+            ax.set_ylabel(str(y.name or "Value"))
+            style_axis(ax, grid_axis="y")
+            ax.legend(frameon=False)
         return axes
 
     def plot_decomposition(self, periods: Sequence[int] | None = None):
-        """MSTL decomposition with the given (or suggested) seasonal periods."""
+        """Plot an MSTL decomposition as aligned, clearly labelled components.
+
+        A separate panel is drawn for each seasonal period. The plot is built
+        explicitly rather than using ``MSTL.plot()`` so component labels and
+        colors do not depend on statsmodels' internal axes ordering.
+        """
+        import matplotlib.dates as mdates
+        import matplotlib.pyplot as plt
         from statsmodels.tsa.seasonal import MSTL
 
-        periods = list(periods or self.suggested_periods_[:2])
+        periods = list(self.suggested_periods_[:2] if periods is None else periods)
         y = self.y_.interpolate(limit_area="inside").dropna()
-        return MSTL(y, periods=periods).fit().plot()
+        if not periods:
+            raise ValueError("At least one seasonal period is required for decomposition.")
+        if any(not isinstance(period, (int, np.integer)) or period < 2 for period in periods):
+            raise ValueError("Seasonal periods must be integers greater than or equal to 2.")
+        if len(set(periods)) != len(periods):
+            raise ValueError("Seasonal periods must be unique.")
+        if len(y) < 2 * max(periods):
+            raise ValueError("MSTL needs at least two complete cycles of the largest seasonal period.")
+
+        result = MSTL(y, periods=periods).fit()
+        components = [("Observed", y, "#315b7d"), ("Trend", result.trend, "#d17a22")]
+        seasonal = result.seasonal
+        if isinstance(seasonal, pd.Series):
+            seasonal = seasonal.to_frame(name=str(periods[0]))
+        for index, period in enumerate(periods):
+            column = seasonal.columns[index]
+            components.append((f"Seasonal - {period} steps", seasonal[column], PALETTE[index % len(PALETTE)]))
+        components.append(("Residual", result.resid, "#a34d4d"))
+
+        fig, axes = plt.subplots(
+            len(components), 1, figsize=(13, 2.35 * len(components)), sharex=True, layout="constrained"
+        )
+        axes = np.atleast_1d(axes)
+        for ax, (label, values, color) in zip(axes, components, strict=True):
+            ax.plot(values.index, values.to_numpy(), color=color, linewidth=1.15)
+            ax.set_title(label, loc="left", fontsize=10, fontweight="bold", pad=5)
+            ax.set_ylabel(str(y.name or "Value") if label == "Observed" else "")
+            style_axis(ax, grid_axis="y")
+        locator = mdates.AutoDateLocator(minticks=4, maxticks=9)
+        axes[-1].xaxis.set_major_locator(locator)
+        axes[-1].xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
+        axes[-1].set_xlabel("Date")
+        fig.suptitle(f"{y.name or 'Series'} - MSTL decomposition", x=0.01, ha="left", fontweight="bold")
+        return fig
 
 
 def feature_relevance(
